@@ -1,0 +1,105 @@
+#!/bin/bash
+# smoke-test.sh — verify skills are wired up correctly.
+# Safe to re-run. Offers optional live tests if user provides a channel.
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
+
+step "冒烟测试"
+
+SKILLS="$OPENCLAW_SKILLS_DIR"
+PASS=0; FAIL=0; SKIP=0
+
+check() {
+  local name="$1" shift_cmd="$1"; shift 2
+  if "$shift_cmd" "$@" >/dev/null 2>&1; then
+    info "$name"
+    PASS=$((PASS+1))
+  else
+    warn "$name — 不通过"
+    FAIL=$((FAIL+1))
+  fi
+}
+
+# Vision
+if [ -x "$SKILLS/vision/scripts/resolve.sh" ]; then
+  if [ -d "$OPENCLAW_HOME/media/inbound" ] && ls "$OPENCLAW_HOME/media/inbound"/*.{jpg,png,webp} >/dev/null 2>&1; then
+    OUT=$("$SKILLS/vision/scripts/resolve.sh" --latest 2>&1 || true)
+    if [ -f "$OUT" ]; then
+      info "vision: resolve --latest 成功（$OUT）"
+      PASS=$((PASS+1))
+    else
+      warn "vision: resolve --latest 返回非文件路径：$OUT"
+      FAIL=$((FAIL+1))
+    fi
+  else
+    dim "vision: 无 inbound 图片可测（用户发一张图后再试）"
+    SKIP=$((SKIP+1))
+  fi
+else
+  warn "vision: 脚本不存在"
+  FAIL=$((FAIL+1))
+fi
+
+# Hearing
+if [ -x "$SKILLS/hearing/scripts/stt.sh" ]; then
+  if has_bin whisper && has_bin ffmpeg; then
+    info "hearing: whisper + ffmpeg 已装"
+    PASS=$((PASS+1))
+    dim "  （首次真·转写会下模型，这里不主动触发）"
+  else
+    warn "hearing: 缺 whisper 或 ffmpeg — brew install openai-whisper ffmpeg"
+    FAIL=$((FAIL+1))
+  fi
+else
+  warn "hearing: 脚本不存在"
+  FAIL=$((FAIL+1))
+fi
+
+# Voice / Sing
+if [ -x "$SKILLS/voice/scripts/voice.sh" ]; then
+  if [ -f "$SKILLS/.env" ]; then
+    if grep -qE "^MINIMAX_API_KEY=.+" "$SKILLS/.env" 2>/dev/null || grep -qE "^VOLCENGINE_API_KEY=.+" "$SKILLS/.env" 2>/dev/null; then
+      info "voice: 至少一个 TTS key 已配"
+      PASS=$((PASS+1))
+    else
+      warn "voice: 未发现 TTS key，说话功能不可用"
+      FAIL=$((FAIL+1))
+    fi
+    if grep -qE "^MINIMAX_API_KEY=.+" "$SKILLS/.env" && grep -qE "^MINIMAX_GROUP_ID=.+" "$SKILLS/.env"; then
+      info "sing: MiniMax key + Group ID 已配"
+      PASS=$((PASS+1))
+    else
+      warn "sing: 缺 MINIMAX_API_KEY 或 MINIMAX_GROUP_ID，唱歌功能不可用"
+      SKIP=$((SKIP+1))
+    fi
+  else
+    warn "voice: $SKILLS/.env 不存在"
+    FAIL=$((FAIL+1))
+  fi
+fi
+
+# Selfie
+if [ -x "$SKILLS/selfie/scripts/selfie.sh" ]; then
+  if grep -qE "^FAL_KEY=.+" "$SKILLS/.env" 2>/dev/null || grep -qE "^KIE_API_KEY=.+" "$SKILLS/.env" 2>/dev/null; then
+    info "selfie: 图像生成 key 已配"
+    PASS=$((PASS+1))
+  else
+    dim "selfie: 未配 FAL_KEY / KIE_API_KEY，自拍不可用（可选）"
+    SKIP=$((SKIP+1))
+  fi
+fi
+
+# Dokidoki
+if has_bin doki; then
+  info "dokidoki: doki 已装"
+  PASS=$((PASS+1))
+else
+  dim "dokidoki: doki 未装 — npm install -g @tryjoy/dokidoki （可选）"
+  SKIP=$((SKIP+1))
+fi
+
+echo
+info "通过 $PASS 项，跳过 $SKIP 项，未通过 $FAIL 项"
+[ "$FAIL" = "0" ]

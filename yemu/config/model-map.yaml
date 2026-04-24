@@ -1,0 +1,82 @@
+# model-map.yaml — 按能力的模型候选表
+#
+# 安装器会：
+# 1) 读用户的 ~/.openclaw/openclaw.json → agents.defaults.models 找出已可用的 provider/model
+# 2) 按下面 capabilities[<role>].preferred 顺序，挑第一个可用的
+# 3) 若候选里有多个可用，交互让用户选
+# 4) 若一个都没有，按 fallback_to 退化，并打印 fallback_msg
+#
+# 要加新模型：往对应 preferred 列表里按偏好顺序加就行。
+
+version: 1
+
+capabilities:
+  # agent 本体首选：需要角色扮演/对话优化
+  roleplay:
+    preferred:
+      - sensenova/SenseChat-Character-Agt    # 商汤角色扮演专用
+      - zhipu/glm-4-plus
+      - zai/glm-5
+      - anthropic/claude-sonnet-4
+      - openai/gpt-4o
+    fallback_msg: |
+      未发现角色扮演优化模型。将使用 general 能力。
+      建议后续添加 sensenova/SenseChat-Character-Agt 以获得最佳角色一致性。
+
+  # vision skill 依赖 primary 模型具备视觉
+  vision:
+    preferred:
+      - anthropic/claude-sonnet-4
+      - anthropic/claude-opus-4
+      - openai/gpt-4o
+      - google/gemini-2-pro
+      - zai/glm-4v
+    fallback_msg: |
+      主模型不具备视觉能力。vision skill 能把图片路径交给 agent，
+      但 agent 看不见图片内容。建议换一个多模态模型作 primary。
+
+  # 日常通用：指令跟随、代码、总结
+  general:
+    preferred:
+      - zai/glm-4.7
+      - zai/glm-5
+      - anthropic/claude-sonnet-4
+      - openai/gpt-4o
+      - zhipu/glm-4-plus
+
+# agent 级偏好
+agents:
+  agent-yemu:
+    capabilities: [roleplay]
+    fallback_to: general
+
+# skill 级依赖
+skills:
+  vision:
+    needs_capabilities: [vision]
+    needs_bins: []
+    needs_env: []
+  hearing:
+    needs_capabilities: []
+    needs_bins: [whisper, ffmpeg]
+    needs_env: []
+    note: "首次运行会下 whisper 模型（~72MB for tiny, ~1.5GB for turbo）"
+  voice:
+    needs_capabilities: []
+    needs_bins: [jq, curl, xxd, uuidgen, ffprobe]
+    needs_env: [FEISHU_APP_ID, FEISHU_APP_SECRET]
+    needs_any_env:
+      - [MINIMAX_API_KEY, MINIMAX_GROUP_ID]   # 能唱歌必须国内 MiniMax
+      - [VOLCENGINE_API_KEY]                   # 仅能说话（不能唱歌）
+  selfie:
+    needs_capabilities: []
+    needs_bins: [jq, curl]
+    needs_env: [FEISHU_APP_ID, FEISHU_APP_SECRET]
+    needs_any_env:
+      - [FAL_KEY]
+      - [KIE_API_KEY]
+  dokidoki:
+    needs_capabilities: []
+    needs_bins: [doki]
+    needs_env: []
+    note: "npm install -g @tryjoy/dokidoki 取得 doki"

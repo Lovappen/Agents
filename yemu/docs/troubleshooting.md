@@ -1,0 +1,115 @@
+# 排错
+
+## 安装器
+
+**`~/.openclaw 不存在`**
+→ 先装 openclaw：`npm i -g openclaw`，然后 `openclaw setup` 走一遍。
+
+**`jq required`**
+→ macOS `brew install jq` / Debian `apt install jq` / Windows `choco install jq`。
+
+**`未在 openclaw.json 中找到任何可用模型`**
+→ `openclaw.json` 里 `agents.defaults.models` 为空。去 [models.md](models.md) 看怎么加。
+
+**安装过程被 Ctrl+C 了**
+→ 重跑即可。已备份的 `openclaw.json.bak-*` 保留在原位。要完全回滚 `cp` 那个备份覆盖就行。
+
+## 飞书
+
+**「Bot can NOT be out of chat」**
+→ 用错 App。每个 agent 要用自己的 `FEISHU_APP_ID` / `SECRET`。在 `<workspace>/skills/.env` 里配的应该是该 agent 的，不是别的。
+
+**消息发不出**
+→ 飞书 token 失效（App Secret 填错）或权限不够。检查：
+  - `im:resource` 权限（上传文件需要）
+  - 应用是否「发布版本」审批通过
+  - `tenant_access_token` 的接口能不能正常拿到 token（用 curl 手动试）
+
+**语音/图片发到群里不响**
+→ 机器人没在群里。群设置 → 群机器人 → 添加。
+
+## voice / sing
+
+**`invalid api key`**
+→ MiniMax key 对不上 endpoint。音乐 API 走 `api.minimaxi.com`（国内），TTS 也在这。国际版 `api.minimax.io` 暂不支持。
+
+**`MINIMAX_API_KEY and MINIMAX_GROUP_ID required`**
+→ 两者都要填。Group ID 在 MiniMax 控制台账户页。
+
+**生成成功但飞书上听不见**
+→ 上传时 `duration` 没传或为 0。脚本里 `ffprobe` 没装时火山引擎 TTS 会返回 0。装 ffmpeg 就好。
+
+**sing 生成太慢**
+→ MiniMax music 本来就 10–60 秒。长一点的歌词更久。免费版 `music-2.6-free` 慢且有配额限。
+
+## hearing / STT
+
+**`whisper not found`**
+→ `brew install openai-whisper` 或 `pip install openai-whisper`。装完 `which whisper` 确认。
+
+**首次运行卡在下载模型**
+→ whisper 去 HuggingFace 拉 `.pt` 文件。`tiny` 72MB，`turbo` 1.5GB。国内网络慢可配 `HF_ENDPOINT=https://hf-mirror.com`。
+
+**转写结果是空**
+→ 音频太短 / 静音 / 纯噪声。告诉用户「没听清能再说一遍吗」。
+
+**中英混杂转写错乱**
+→ 设 `WHISPER_LANGUAGE=zh`（或 `en`）强制，或升级到 `medium`/`large-v3` 模型。
+
+## vision
+
+**`Key not found in gateway log`**
+→ image_key 日志被轮转或截断。回退：`resolve.sh --latest` 取最近一张。
+
+**图片文件存在但 agent 没看懂**
+→ primary 模型不支持多模态。换多模态模型（见 [models.md](models.md)），或在 custom.md 里明确指示 agent 只报告路径不做解读。
+
+## selfie
+
+**`No reference image found`**
+→ `<workspace>/skills/.env` 里 `SELFIE_REFERENCE_IMAGE` 没填。填一张角色参考图的公网 URL。
+
+**fal.ai 超时**
+→ fal 某些时段不稳。降级到 `KIE_API_KEY` + `provider=kie`。
+
+## dokidoki
+
+**`doki: command not found`**
+→ `npm install -g @tryjoy/dokidoki`。macOS 下可能还需要 `npm config set unsafe-perm true`。
+
+**扫描不到设备**
+→ 开蓝牙。macOS 给终端 `Bluetooth` 权限（系统设置 → 隐私与安全性 → 蓝牙）。
+
+## 通用
+
+**所有 skill 都挂**
+→ gateway 没起来。`launchctl list | grep openclaw`。
+
+```bash
+# 重启
+launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway
+
+# 看日志
+tail -f ~/.openclaw/logs/gateway.log
+tail -f ~/.openclaw/logs/gateway.err.log
+```
+
+**openclaw.json 被我改坏了**
+→ 从备份恢复：
+
+```bash
+ls ~/.openclaw/openclaw.json.bak-*
+cp ~/.openclaw/openclaw.json.bak-YYYYMMDD-HHMMSS ~/.openclaw/openclaw.json
+launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway
+```
+
+## 提 Issue
+
+[github.com/Lovappen/Agents/issues](https://github.com/Lovappen/Agents/issues)
+
+带上：
+
+1. 出错命令 + 完整输出
+2. `gateway.log` / `gateway.err.log` 相关片段
+3. `openclaw --version`、OS、Node 版本
+4. `bash yemu/scripts/smoke-test.sh` 输出
