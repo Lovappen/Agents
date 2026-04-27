@@ -285,6 +285,26 @@ fi
 log_info "Image ready: $IMAGE_URL"
 
 # ──────────────────────────────────────────────
+# ACP mode short-circuit: emit artifact path; host fans out per-platform.
+# ──────────────────────────────────────────────
+if [ "${OPENCLAW_OUTPUT_MODE:-feishu}" = "acp" ]; then
+  TEMP_FILE="/tmp/selfie_$(date +%s).${OUTPUT_FORMAT:-png}"
+  if curl -s -o "$TEMP_FILE" "$IMAGE_URL" && [ -s "$TEMP_FILE" ]; then
+    skill_log_ok selfie acp_emit "path=$TEMP_FILE" "provider=$PROVIDER"
+    if command -v cc-connect >/dev/null 2>&1; then
+      cc-connect send --image "$TEMP_FILE" ${OPENCLAW_CCCONNECT_PROJECT:+-p "$OPENCLAW_CCCONNECT_PROJECT"} -m "📸" >/dev/null 2>&1 \
+        && skill_log_ok selfie ccconnect_send "path=$TEMP_FILE" \
+        || skill_log_fail selfie ccconnect_send "path=$TEMP_FILE"
+    fi
+    printf '{"type":"image","path":"%s","url":"%s","provider":"%s"}\n' "$TEMP_FILE" "$IMAGE_URL" "$PROVIDER"
+  else
+    skill_log_ok selfie acp_emit_url "url=$IMAGE_URL" "provider=$PROVIDER"
+    printf '{"type":"image","url":"%s","provider":"%s"}\n' "$IMAGE_URL" "$PROVIDER"
+  fi
+  exit 0
+fi
+
+# ──────────────────────────────────────────────
 # Feishu special handling: upload image first for inline display
 # ──────────────────────────────────────────────
 _send_to_feishu() {

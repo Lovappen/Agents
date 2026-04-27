@@ -162,6 +162,22 @@ if [ -z "$DURATION" ] || [ "$DURATION" = "null" ] || [ "$DURATION" = "0" ]; then
 fi
 
 # ============================
+# ACP mode short-circuit: skill emits artifact path, host (cc-connect / openclaw)
+# fans out to whatever platform the session is bound to.
+# ============================
+if [ "${OPENCLAW_OUTPUT_MODE:-feishu}" = "acp" ]; then
+  skill_log_ok voice acp_emit "path=$MP3_FILE" "provider=$PROVIDER" "duration_ms=$DURATION"
+  # If cc-connect is the host, push the attachment via its CLI side-channel.
+  if command -v cc-connect >/dev/null 2>&1; then
+    cc-connect send --file "$MP3_FILE" ${OPENCLAW_CCCONNECT_PROJECT:+-p "$OPENCLAW_CCCONNECT_PROJECT"} -m "🎤" >/dev/null 2>&1 \
+      && skill_log_ok voice ccconnect_send "path=$MP3_FILE" \
+      || skill_log_fail voice ccconnect_send "path=$MP3_FILE"
+  fi
+  printf '{"type":"audio","path":"%s","duration_ms":%s,"provider":"%s"}\n' "$MP3_FILE" "${DURATION:-0}" "$PROVIDER"
+  exit 0
+fi
+
+# ============================
 # Feishu: get token → upload mp3 → send audio
 # ============================
 [ -z "${FEISHU_APP_ID:-}" ] || [ -z "${FEISHU_APP_SECRET:-}" ] && { log_error "FEISHU_APP_ID and FEISHU_APP_SECRET required"; exit 1; }

@@ -30,11 +30,39 @@
 - **看图**：收到 `{"image_key":"..."}` 或 `<media:image>` 先 `resolve.sh` 拿路径，再 `Read` 看
 - **听语音**：收到 `[Audio]` / `<media:audio>` 先 `stt.sh --latest` 转写
 
+## 输出模式（重要）
+
+skill 脚本支持两种产物投递方式，由环境变量 `OPENCLAW_OUTPUT_MODE` 选择：
+
+- **`feishu`（默认，向后兼容）**：脚本生成文件后自己上传到飞书并 send。需要 `FEISHU_APP_ID/SECRET` + `<channel>` 是真实飞书 chat_id。
+- **`acp`（多平台 host 接管）**：脚本只生成文件，把 `{"type":"audio|image","path":"/abs/path",...}` 输出到 stdout，由 host（cc-connect / openclaw 多渠道层）按当前会话的真实平台投递。**适用于通过 cc-connect 接微信/微博/QQ 等非飞书渠道时**。
+  - 此时 `<channel>` 参数随便填即可（如 `acp`），脚本不会用它发消息。
+  - **agent 收到这类 JSON 后，把 `path` 直接在回复正文里以 `[文件: /tmp/xx.png]` 这种格式贴出来**，host 会拦截并替换成原生附件。
+
 ## 环境
 
 - 通用 env 在 `~/.openclaw/skills/.env`
 - 本 agent 私有 env（Feishu 凭据 + 角色标识）在 `<workspace>/skills/.env`
 - 后者覆盖前者
+- `OPENCLAW_OUTPUT_MODE`：`feishu`（默认）或 `acp`（cc-connect 集成时设此值）
+
+## 主动行为脚本（workspace/scripts/）
+
+奈子有一套"思念机制"，由 openclaw cron 驱动 + 用户消息触发。脚本骨架已装到 `<workspace>/scripts/`。
+
+| 脚本 | 谁来调 | 干什么 |
+|---|---|---|
+| `heartbeat-check.sh` | cron `yemu-heartbeat`（每 30 分钟）— agent 在被唤起时 `Bash` 调用 | 更新思念值/情绪值。退出码 1 = 达阈值，agent 应主动发一条思念消息到当前 session |
+| `daily-missing-reminder.sh` | cron `yemu-missing-reminder`（每天 16:50） | 触发 doki 振动 + 兜底通过 cc-connect/openclaw 发条消息（agentTurn 里 agent 也会自己生成） |
+| `mood-recovery.sh` | **agent 在每次收到用户消息时主动调用** | 思念值清零、情绪回血。务必在每个 turn 开头跑一次 |
+
+调用约定：
+```bash
+bash <workspace>/scripts/heartbeat-check.sh   # 退出码 1 = 触发
+bash <workspace>/scripts/mood-recovery.sh     # 用户来消息时
+```
+
+state 文件：`<workspace>/memory/heartbeat-state.json`（思念值 + 情绪值的 source of truth，所有脚本读写它）。
 
 ## 用户自定义
 

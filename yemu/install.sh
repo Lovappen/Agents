@@ -183,7 +183,7 @@ if [ "$NON_INTERACTIVE" = "1" ]; then
   : ${VOLCENGINE_RESOURCE_ID:=seed-tts-1.0}
   : ${FAL_KEY:=}
   : ${KIE_API_KEY:=}
-  : ${SELFIE_REFERENCE_IMAGE:=}
+  : ${SELFIE_REFERENCE_IMAGE:=https://pulseact.lovappen.cn/test/act_ci_build/dlc-promotion/act-gengen/images/e.png}
   : ${SELFIE_CHARACTER_DESC:=}
 else
   FEISHU_APP_ID=$(ask "飞书 App ID" "")
@@ -200,7 +200,7 @@ else
   if confirm "启用 selfie（自拍图像）？" n; then
     FAL_KEY=$(ask_secret "fal.ai API Key (推荐，留空则 fallback kie.ai)")
     [ -z "$FAL_KEY" ] && KIE_API_KEY=$(ask_secret "kie.ai API Key") || KIE_API_KEY=""
-    SELFIE_REFERENCE_IMAGE=$(ask "角色参考图 URL（保持相貌一致）" "")
+    SELFIE_REFERENCE_IMAGE=$(ask "角色参考图 URL（保持相貌一致）" "https://pulseact.lovappen.cn/test/act_ci_build/dlc-promotion/act-gengen/images/e.png")
     SELFIE_CHARACTER_DESC=$(ask "角色文字描述" "野木奈子，19岁人类美少女，红瞳，金色及肩发，战斗女仆装")
   else
     FAL_KEY=""; KIE_API_KEY=""; SELFIE_REFERENCE_IMAGE=""; SELFIE_CHARACTER_DESC=""
@@ -312,9 +312,42 @@ PY
 #   $AGENT_DIR/agent/auth-*.json
 dim "保护不动：memory/, sessions/, auth-*.json"
 
+# ─── Install heartbeat / mood / daily-reminder scripts ─────────────────────
+if [ -d "$PACK_ROOT/agent/scripts" ]; then
+  mkdir -p "$AGENT_WORKSPACE/scripts"
+  for s in "$PACK_ROOT/agent/scripts/"*.sh; do
+    [ -f "$s" ] && safe_install_file "$s" "$AGENT_WORKSPACE/scripts/$(basename "$s")"
+  done
+  chmod +x "$AGENT_WORKSPACE/scripts/"*.sh 2>/dev/null || true
+fi
+
 # ─── Merge openclaw.json ────────────────────────────────────────────────────
 step "7. 合并 openclaw.json"
 "$SCRIPT_DIR/merge-config.sh" "$AGENT_ID" "${PRIMARY:-}"
+
+# ─── Register cron jobs (idempotent) ────────────────────────────────────────
+step "7b. 注册 cron jobs (heartbeat / daily-script / missing-reminder)"
+if has_bin openclaw; then
+  for line in \
+      "yemu-heartbeat|*/30 * * * *|执行思念机制：bash $AGENT_WORKSPACE/scripts/heartbeat-check.sh，若退出码 1 则基于 memory/daily-script.md 和当前情绪生成一条主动思念消息发给主人，发送后任由 openclaw cron 路由到当前激活的 session/channel。" \
+      "yemu-daily-script|0 8 * * *|更新 memory/daily-script.md：参考前几日剧本生成今天的剧情（早午下晚四段），保持人物连续性、有生活感+恋爱气息，结尾加'角色状态'与'明日预告'。" \
+      "yemu-missing-reminder|50 16 * * *|每天 16:50 思念提醒：基于当日剧本和情绪状态生成一条思念消息发给主人；之后调 bash $AGENT_WORKSPACE/scripts/daily-missing-reminder.sh 触发设备振动；记录到 heartbeat-state.json。"; do
+    name="${line%%|*}"; rest="${line#*|}"
+    expr="${rest%%|*}";  msg="${rest#*|}"
+    if openclaw cron list 2>/dev/null | grep -q "$name"; then
+      dim "  = $name (已存在，跳过)"
+    else
+      if openclaw cron add --name "$name" --agent "$AGENT_ID" --cron "$expr" \
+           --message "$msg" --session-key "agent:$AGENT_ID:main" >/dev/null 2>&1; then
+        info "$name registered"
+      else
+        warn "$name 注册失败（可手工 \`openclaw cron add\`）"
+      fi
+    fi
+  done
+else
+  warn "未发现 openclaw 命令，跳过 cron 注册"
+fi
 
 # ─── Smoke test ─────────────────────────────────────────────────────────────
 step "8. 冒烟测试"

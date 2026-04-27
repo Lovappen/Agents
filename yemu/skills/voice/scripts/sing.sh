@@ -53,9 +53,11 @@ EOF
 fi
 
 [ -z "${MINIMAX_API_KEY:-}" ] || [ -z "${MINIMAX_GROUP_ID:-}" ] && { log_error "MINIMAX_API_KEY and MINIMAX_GROUP_ID required"; exit 1; }
-if [ -z "${FEISHU_APP_ID:-}" ] || [ -z "${FEISHU_APP_SECRET:-}" ]; then
-  log_error "FEISHU_APP_ID and FEISHU_APP_SECRET required"
-  exit 1
+if [ "${OPENCLAW_OUTPUT_MODE:-feishu}" != "acp" ]; then
+  if [ -z "${FEISHU_APP_ID:-}" ] || [ -z "${FEISHU_APP_SECRET:-}" ]; then
+    log_error "FEISHU_APP_ID and FEISHU_APP_SECRET required"
+    exit 1
+  fi
 fi
 
 skill_log_start voice music_request "model=$MODEL" "channel=$CHANNEL" "lyrics_len=${#LYRICS}"
@@ -101,6 +103,20 @@ if [ "$FSIZE" -lt 1000 ]; then
 fi
 log_info "Song generated: ${FSIZE} bytes, ${DURATION_MS}ms"
 skill_log_ok voice music_generate "model=$MODEL" "duration_ms=$DURATION_MS" "file_size=$FSIZE"
+
+# -----------------------------------------------------------
+# ACP mode short-circuit
+# -----------------------------------------------------------
+if [ "${OPENCLAW_OUTPUT_MODE:-feishu}" = "acp" ]; then
+  skill_log_ok voice acp_emit_song "path=$MP3_FILE" "model=$MODEL" "duration_ms=$DURATION_MS"
+  if command -v cc-connect >/dev/null 2>&1; then
+    cc-connect send --file "$MP3_FILE" ${OPENCLAW_CCCONNECT_PROJECT:+-p "$OPENCLAW_CCCONNECT_PROJECT"} -m "🎵" >/dev/null 2>&1 \
+      && skill_log_ok voice ccconnect_send_song "path=$MP3_FILE" \
+      || skill_log_fail voice ccconnect_send_song "path=$MP3_FILE"
+  fi
+  printf '{"type":"audio","path":"%s","duration_ms":%s,"model":"%s","kind":"song"}\n' "$MP3_FILE" "${DURATION_MS:-0}" "$MODEL"
+  exit 0
+fi
 
 # -----------------------------------------------------------
 # Feishu upload + send (same pattern as voice.sh)
