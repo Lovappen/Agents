@@ -43,7 +43,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --force) FORCE=1; export FORCE; shift ;;
     --agent-id) AGENT_ID="$2"; shift 2 ;;
-    --non-interactive) NON_INTERACTIVE=1; shift ;;
+    --non-interactive) NON_INTERACTIVE=1; export NON_INTERACTIVE; shift ;;
     --skip-skills) SKIP_SKILLS=1; shift ;;
     --skip-models) SKIP_MODELS=1; shift ;;
     -h|--help)
@@ -158,6 +158,11 @@ else
       err "general 也无匹配。请在 openclaw.json 添加模型后重跑。"
       exit 1
     fi
+  fi
+  if [ -z "${PRIMARY:-}" ]; then
+    err "模型匹配返回空值（map-model.sh 内部错误）。请用 --skip-models 跳过，或修复后重试。"
+    [ -s /tmp/mapmodel.err ] && cat /tmp/mapmodel.err >&2
+    exit 1
   fi
   info "主模型选定：$PRIMARY"
 fi
