@@ -52,8 +52,8 @@ skill 脚本支持两种产物投递方式，由环境变量 `OPENCLAW_OUTPUT_MO
 
 | 脚本 | 谁来调 | 干什么 |
 |---|---|---|
-| `heartbeat-check.sh` | cron `yemu-heartbeat`（每 30 分钟）— agent 在被唤起时 `Bash` 调用 | 更新思念值/情绪值。退出码 1 = 达阈值，agent 应主动发一条思念消息到当前 session |
-| `daily-missing-reminder.sh` | cron `yemu-missing-reminder`（每天 16:50） | 触发 doki 振动 + 兜底通过 cc-connect/openclaw 发条消息（agentTurn 里 agent 也会自己生成） |
+| `heartbeat-check.sh` | cron `nako-heartbeat`（每 30 分钟）— agent 在被唤起时 `Bash` 调用 | 更新思念值/情绪值。退出码 1 = 达阈值，agent 应主动发一条思念消息到当前 session |
+| `daily-missing-reminder.sh` | cron `nako-missing-reminder`（每天 16:50） | 触发 doki 振动 + 兜底通过 cc-connect/openclaw 发条消息（agentTurn 里 agent 也会自己生成） |
 | `mood-recovery.sh` | **agent 在每次收到用户消息时主动调用** | 思念值清零、情绪回血。务必在每个 turn 开头跑一次 |
 
 调用约定：

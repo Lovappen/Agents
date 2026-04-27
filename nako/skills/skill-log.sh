@@ -11,7 +11,7 @@
 #   skill_log selfie video_send success provider=fal video_url=https://... message_id=om_xxx channel=ou_xxx
 
 # Log file resolves to the calling skill's own directory
-# e.g. workspace/agent-yemu/skills/voice/logs/skill.jsonl
+# e.g. workspace/agent-nako/skills/voice/logs/skill.jsonl
 # Set SKILL_LOG_FILE before sourcing to override
 if [ -z "${SKILL_LOG_FILE:-}" ]; then
   # Derive from the script that sourced us: script → scripts/ → skill_dir → logs/

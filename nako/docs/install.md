@@ -3,13 +3,13 @@
 ## 交互式安装
 
 ```bash
-bash yemu/install.sh
+bash nako/install.sh
 ```
 
 安装器 8 步：
 
 1. **前置检查** — 验证 `python3 jq curl uuidgen`，`~/.openclaw` 存在，`openclaw.json` 存在。软依赖 (`whisper ffmpeg doki`) 缺失只警告不退出。
-2. **Agent 冲突** — 若 `agent-yemu` workspace 已存在，问你升级、重命名、还是中止。
+2. **Agent 冲突** — 若 `agent-nako` workspace 已存在，问你升级、重命名、还是中止。
 3. **模型映射** — 读 `~/.openclaw/openclaw.json` 的 `agents.defaults.models`，按 `config/model-map.yaml` 的 `roleplay` 偏好挑一个。找不到 → 退化到 `general`；还找不到 → 报错退出，让你先加模型。
 4. **收集凭据** — 交互问：飞书 App ID/Secret、MiniMax、Volcengine、FAL、参考图。留空即跳过该能力。
 5. **安装 skills** — 拷贝 `skills/{vision,hearing,voice,selfie,dokidoki,skill-log.sh}` 到 `~/.openclaw/skills/`。共享 `.env` 只填入新 key，已有值保留。
@@ -22,7 +22,7 @@ bash yemu/install.sh
 | Flag | 说明 |
 |---|---|
 | `--force` | 覆盖已存在的人设文件（仍会备份） |
-| `--agent-id <id>` | 改 agent id（默认 `agent-yemu`） |
+| `--agent-id <id>` | 改 agent id（默认 `agent-nako`） |
 | `--non-interactive` | 不交互；从环境变量读所有凭据 |
 | `--skip-skills` | 只装 agent 人设，跳过 skills |
 | `--skip-models` | 不做模型映射，沿用 `openclaw.json` 现有 primary |
@@ -38,7 +38,7 @@ export MINIMAX_API_KEY=sk-xxx
 export MINIMAX_GROUP_ID=123
 export FAL_KEY=xxx
 export SELFIE_REFERENCE_IMAGE="https://..."
-bash yemu/install.sh --non-interactive
+bash nako/install.sh --non-interactive
 ```
 
 Windows:
@@ -48,7 +48,7 @@ $env:FEISHU_APP_ID = "cli_xxx"
 $env:FEISHU_APP_SECRET = "xxx"
 $env:MINIMAX_API_KEY = "sk-xxx"
 $env:MINIMAX_GROUP_ID = "123"
-pwsh yemu\install.ps1 -NonInteractive
+pwsh nako\install.ps1 -NonInteractive
 ```
 
 ## 重装 / 升级
@@ -77,8 +77,8 @@ launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway
 ```bash
 # 1. 从 agents.list 里删该 entry（手动编辑）
 # 2. 删 workspace 和数据
-rm -rf ~/.openclaw/workspace/agent-yemu
-rm -rf ~/.openclaw/agents/agent-yemu
+rm -rf ~/.openclaw/workspace/agent-nako
+rm -rf ~/.openclaw/agents/agent-nako
 ```
 
 ## 目录影响总览

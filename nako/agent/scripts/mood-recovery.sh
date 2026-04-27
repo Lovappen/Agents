@@ -2,7 +2,7 @@
 # 奈子的情绪恢复 - 用户发消息时调用
 # 情绪值恢复 20-40，上限 100
 
-WORKSPACE="${OPENCLAW_AGENT_WORKSPACE:-$HOME/.openclaw/workspace/agent-yemu}"
+WORKSPACE="${OPENCLAW_AGENT_WORKSPACE:-$HOME/.openclaw/workspace/agent-nako}"
 STATE_FILE="$WORKSPACE/memory/heartbeat-state.json"
 mkdir -p "$(dirname "$STATE_FILE")"
 TIMESTAMP=$(date -Iseconds)

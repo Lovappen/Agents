@@ -6,7 +6,7 @@
 
 | Agent | 角色 | 渠道 | 快装 |
 |---|---|---|---|
-| [yemu](yemu/) | 战斗女仆 野木奈子 | 飞书 | `curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/yemu/install.sh \| bash` |
+| [nako](nako/) | 战斗女仆 野木奈子 | 飞书 | `curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.sh \| bash` |
 
 ## Roadmap
 
@@ -16,7 +16,7 @@
 
 ## 贡献
 
-欢迎开 PR 加新 agent pack。格式参考 `yemu/` 的目录结构：
+欢迎开 PR 加新 agent pack。格式参考 `nako/` 的目录结构：
 
 ```
 your-agent/

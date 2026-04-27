@@ -15,7 +15,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
-AGENT_ID="${1:-agent-yemu}"
+AGENT_ID="${1:-agent-nako}"
 PRIMARY="${2:-}"
 [ -z "$PRIMARY" ] && { err "usage: $0 <agent_id> <primary_model>"; exit 1; }
 

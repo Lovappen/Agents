@@ -12,7 +12,7 @@
 5. 还没命中 → 报错退出，让你先加模型
 ```
 
-## 推荐模型（按 yemu 角色扮演的契合度）
+## 推荐模型（按 nako 角色扮演的契合度）
 
 | 模型 | 提供商 | 评价 |
 |---|---|---|
@@ -25,7 +25,7 @@
 ## 查当前已配模型
 
 ```bash
-bash yemu/scripts/detect-models.sh
+bash nako/scripts/detect-models.sh
 ```
 
 输出：
@@ -45,7 +45,7 @@ zai/glm-4.7                 * (primary)
 
 ```json
 {
-  "id": "agent-yemu",
+  "id": "agent-nako",
   "model": { "primary": "sensenova/SenseChat-Character-Agt" }
 }
 ```
@@ -101,7 +101,7 @@ capabilities:
 
 ## 上下文窗口
 
-角色扮演类 agent 对话往往很长。推荐 primary 至少 128K 上下文。yemu 默认 `sensenova/SenseChat-Character-Agt` 是 198K。
+角色扮演类 agent 对话往往很长。推荐 primary 至少 128K 上下文。nako 默认 `sensenova/SenseChat-Character-Agt` 是 198K。
 
 如果用小上下文模型（< 32K），必要时调 openclaw 的 compaction：
 

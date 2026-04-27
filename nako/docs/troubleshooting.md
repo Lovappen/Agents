@@ -112,4 +112,4 @@ launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway
 1. 出错命令 + 完整输出
 2. `gateway.log` / `gateway.err.log` 相关片段
 3. `openclaw --version`、OS、Node 版本
-4. `bash yemu/scripts/smoke-test.sh` 输出
+4. `bash nako/scripts/smoke-test.sh` 输出

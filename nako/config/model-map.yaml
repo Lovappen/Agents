@@ -46,7 +46,7 @@ capabilities:
 
 # agent 级偏好
 agents:
-  agent-yemu:
+  agent-nako:
     capabilities: [roleplay]
     fallback_to: general
 

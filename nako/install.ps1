@@ -1,13 +1,13 @@
-# install.ps1 — Yemu agent pack installer for Windows PowerShell 7+
+# install.ps1 — Nako agent pack installer for Windows PowerShell 7+
 #
 # Usage:
-#   iex (iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/yemu/install.ps1).Content
-#   # or: pwsh yemu\install.ps1 [-Force] [-AgentId agent-yemu] [-NonInteractive] [-SkipSkills] [-SkipModels]
+#   iex (iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.ps1).Content
+#   # or: pwsh nako\install.ps1 [-Force] [-AgentId agent-nako] [-NonInteractive] [-SkipSkills] [-SkipModels]
 
 [CmdletBinding()]
 param(
   [switch]$Force,
-  [string]$AgentId = "agent-yemu",
+  [string]$AgentId = "agent-nako",
   [switch]$NonInteractive,
   [switch]$SkipSkills,
   [switch]$SkipModels
@@ -63,10 +63,10 @@ if ($PSCommandPath) {
   if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     ErrL "git required"; exit 1
   }
-  $TmpDl = Join-Path $env:TEMP ("yemu-pack-" + [guid]::NewGuid().ToString('N'))
+  $TmpDl = Join-Path $env:TEMP ("nako-pack-" + [guid]::NewGuid().ToString('N'))
   Write-Host "正在克隆 Agents 仓库 → $TmpDl ..."
   git clone --depth 1 https://github.com/Lovappen/Agents.git $TmpDl 2>$null | Out-Null
-  $PackRoot = Join-Path $TmpDl "yemu"
+  $PackRoot = Join-Path $TmpDl "nako"
 }
 $ScriptDir = Join-Path $PackRoot "scripts"
 

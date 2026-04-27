@@ -3,7 +3,7 @@
 # 优化版：凌晨1点到8点暂停计算（思念值不增长）
 # 包含情绪值系统
 
-WORKSPACE="${OPENCLAW_AGENT_WORKSPACE:-$HOME/.openclaw/workspace/agent-yemu}"
+WORKSPACE="${OPENCLAW_AGENT_WORKSPACE:-$HOME/.openclaw/workspace/agent-nako}"
 STATE_FILE="$WORKSPACE/memory/heartbeat-state.json"
 SCRIPT_FILE="$WORKSPACE/memory/daily-script.md"
 mkdir -p "$(dirname "$STATE_FILE")"

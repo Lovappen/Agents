@@ -1,6 +1,6 @@
 #!/bin/bash
 # lib.sh — shared installer helpers
-# Source this from any scripts/*.sh inside the yemu pack.
+# Source this from any scripts/*.sh inside the nako pack.
 
 set -euo pipefail
 
@@ -158,9 +158,9 @@ env_merge() {
 
 # ───── Determine pack root from any script location ─────
 pack_root() {
-  # Called from yemu/scripts/*.sh or yemu/install.sh
+  # Called from nako/scripts/*.sh or nako/install.sh
   local dir; dir="$(cd "$(dirname "${BASH_SOURCE[1]:-$0}")" && pwd)"
-  # if under scripts/ → go up one; if under yemu root → itself
+  # if under scripts/ → go up one; if under nako root → itself
   if [ "$(basename "$dir")" = "scripts" ]; then
     dirname "$dir"
   else

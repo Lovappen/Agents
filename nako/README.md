@@ -7,22 +7,22 @@
 **macOS / Linux:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/yemu/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.sh | bash
 ```
 
 **Windows (PowerShell 7+):**
 
 ```powershell
-iex (iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/yemu/install.ps1).Content
+iex (iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.ps1).Content
 ```
 
 或者克隆仓库本地跑：
 
 ```bash
 git clone https://github.com/Lovappen/Agents.git
-bash Agents/yemu/install.sh
+bash Agents/nako/install.sh
 # Windows:
-pwsh Agents\yemu\install.ps1
+pwsh Agents\nako\install.ps1
 ```
 
 ## 前置

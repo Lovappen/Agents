@@ -1,13 +1,13 @@
 #!/bin/bash
-# install.sh — Yemu agent pack installer for macOS / Linux.
+# install.sh — Nako agent pack installer for macOS / Linux.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/yemu/install.sh | bash
-#   # or clone repo then:  bash yemu/install.sh [--force] [--agent-id <id>] [--non-interactive]
+#   curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.sh | bash
+#   # or clone repo then:  bash nako/install.sh [--force] [--agent-id <id>] [--non-interactive]
 #
 # Flags:
 #   --force             : overwrite existing persona files (user data still preserved)
-#   --agent-id ID       : rename the agent (default: agent-yemu)
+#   --agent-id ID       : rename the agent (default: agent-nako)
 #   --non-interactive   : no prompts; expects env vars set already; picks defaults
 #   --skip-skills       : skip skill install (persona only)
 #   --skip-models       : skip model mapping (keep existing primary)
@@ -26,7 +26,7 @@ else
   trap 'rm -rf "$TMPDL"' EXIT
   echo "正在克隆 Agents 仓库 → $TMPDL ..."
   git clone --depth 1 https://github.com/Lovappen/Agents.git "$TMPDL" >/dev/null 2>&1
-  PACK_ROOT="$TMPDL/yemu"
+  PACK_ROOT="$TMPDL/nako"
 fi
 
 SCRIPT_DIR="$PACK_ROOT/scripts"
@@ -34,7 +34,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 # ─── Parse flags ────────────────────────────────────────────────────────────
 FORCE=0
-AGENT_ID="agent-yemu"
+AGENT_ID="agent-nako"
 NON_INTERACTIVE=0
 SKIP_SKILLS=0
 SKIP_MODELS=0
@@ -120,7 +120,7 @@ if [ -d "$AGENT_WORKSPACE" ] || [ -d "$AGENT_DIR" ]; then
     case "$CHOICE" in
       升级*) info "将保留用户数据，仅刷人设文件" ;;
       用别的*)
-        NEW=$(ask "新 agent id（如 agent-yemu2）" "${AGENT_ID}2")
+        NEW=$(ask "新 agent id（如 agent-nako2）" "${AGENT_ID}2")
         AGENT_ID="$NEW"
         AGENT_WORKSPACE="$OPENCLAW_WORKSPACES/$AGENT_ID"
         AGENT_DIR="$OPENCLAW_HOME/agents/$AGENT_ID"
@@ -142,7 +142,7 @@ else
   "$SCRIPT_DIR/detect-models.sh" | sed 's/^/  /' || true
   echo
 
-  # Pick for yemu (capability: roleplay)
+  # Pick for nako (capability: roleplay)
   set +e
   PRIMARY=$("$SCRIPT_DIR/map-model.sh" roleplay 2>/tmp/mapmodel.err)
   RC=$?
@@ -329,9 +329,9 @@ step "7. 合并 openclaw.json"
 step "7b. 注册 cron jobs (heartbeat / daily-script / missing-reminder)"
 if has_bin openclaw; then
   for line in \
-      "yemu-heartbeat|*/30 * * * *|执行思念机制：bash $AGENT_WORKSPACE/scripts/heartbeat-check.sh，若退出码 1 则基于 memory/daily-script.md 和当前情绪生成一条主动思念消息发给主人，发送后任由 openclaw cron 路由到当前激活的 session/channel。" \
-      "yemu-daily-script|0 8 * * *|更新 memory/daily-script.md：参考前几日剧本生成今天的剧情（早午下晚四段），保持人物连续性、有生活感+恋爱气息，结尾加'角色状态'与'明日预告'。" \
-      "yemu-missing-reminder|50 16 * * *|每天 16:50 思念提醒：基于当日剧本和情绪状态生成一条思念消息发给主人；之后调 bash $AGENT_WORKSPACE/scripts/daily-missing-reminder.sh 触发设备振动；记录到 heartbeat-state.json。"; do
+      "nako-heartbeat|*/30 * * * *|执行思念机制：bash $AGENT_WORKSPACE/scripts/heartbeat-check.sh，若退出码 1 则基于 memory/daily-script.md 和当前情绪生成一条主动思念消息发给主人，发送后任由 openclaw cron 路由到当前激活的 session/channel。" \
+      "nako-daily-script|0 8 * * *|更新 memory/daily-script.md：参考前几日剧本生成今天的剧情（早午下晚四段），保持人物连续性、有生活感+恋爱气息，结尾加'角色状态'与'明日预告'。" \
+      "nako-missing-reminder|50 16 * * *|每天 16:50 思念提醒：基于当日剧本和情绪状态生成一条思念消息发给主人；之后调 bash $AGENT_WORKSPACE/scripts/daily-missing-reminder.sh 触发设备振动；记录到 heartbeat-state.json。"; do
     name="${line%%|*}"; rest="${line#*|}"
     expr="${rest%%|*}";  msg="${rest#*|}"
     if openclaw cron list 2>/dev/null | grep -q "$name"; then

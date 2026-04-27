@@ -68,11 +68,11 @@ Agent 会调 `openclaw` 的 model-switch API（如支持），或提示用户换
 
 把 `SOUL.md` / `IDENTITY.md` 整个换掉即可。重跑 `install.sh --force` 会用仓库版本覆盖（会备份）。
 
-推荐做法：fork 仓库，改 `yemu/agent/*.md`，然后你自己维护。安装器指向你的 fork：
+推荐做法：fork 仓库，改 `nako/agent/*.md`，然后你自己维护。安装器指向你的 fork：
 
 ```bash
 git clone https://github.com/YOU/Agents.git
-bash Agents/yemu/install.sh
+bash Agents/nako/install.sh
 ```
 
 ## 调 Skill 行为
@@ -113,9 +113,9 @@ tail -f ~/.openclaw/skills/voice/logs/skill.jsonl | jq .
 ```bash
 cd /path/to/Agents
 git pull
-bash yemu/install.sh    # 交互询问每个文件是否覆盖
+bash nako/install.sh    # 交互询问每个文件是否覆盖
 # 或
-bash yemu/install.sh --force  # 全部覆盖（仍备份）
+bash nako/install.sh --force  # 全部覆盖（仍备份）
 ```
 
 你写的 `custom.md` / memory/ / sessions/ 永远不会被动。
