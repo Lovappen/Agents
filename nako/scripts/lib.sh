@@ -34,10 +34,25 @@ ask() {
 }
 
 ask_secret() {
-  local question="$1"; local reply
-  echo -en "${C_CYAN}?${C_NC} $question ${C_DIM}(输入隐藏；直接回车跳过)${C_NC}: " >&2
-  read -rs reply </dev/tty
+  # 每输入一字符 echo 一个 *，看得见进度但内容隐藏。回车结束。
+  # backspace (0x7f) 删一个 *。结束后若长度 > 8，提示首4…末4 让用户对比是否粘贴正确。
+  local question="$1" reply="" ch
+  echo -en "${C_CYAN}?${C_NC} $question ${C_DIM}(直接回车跳过；粘贴时会逐字符显示 *)${C_NC}: " >&2
+  while IFS= read -rs -n 1 ch </dev/tty; do
+    case "$ch" in
+      "")          break ;;                                              # Enter
+      $'\x7f'|$'\b')                                                     # Backspace / DEL
+        if [ -n "$reply" ]; then reply="${reply%?}"; echo -en "\b \b" >&2; fi
+        ;;
+      *)           reply+="$ch"; echo -n "*" >&2 ;;
+    esac
+  done
   echo >&2
+  if [ "${#reply}" -gt 8 ]; then
+    echo -e "${C_DIM}  ↳ ${reply:0:4}…${reply: -4} (${#reply} 字符)${C_NC}" >&2
+  elif [ -n "$reply" ]; then
+    echo -e "${C_DIM}  ↳ ${#reply} 字符${C_NC}" >&2
+  fi
   echo "$reply"
 }
 
