@@ -36,9 +36,13 @@ bash scripts/cc-connect-setup.sh --agent-id agent-foo --with-feishu --with-weixi
 
 ## Roadmap
 
-- [ ] 微信 channel 兼容（via `@tencent-weixin/openclaw-weixin`）
-- [ ] MiniMax 国际版（`api.minimax.io`）
-- [ ] 更多 agent 模板（办公助手、学习搭档…）
+- [x] **多平台接入**：飞书原生 + 通过 [cc-connect](https://github.com/chenhg5/cc-connect) 接微信/Telegram/Slack/Discord/QQ/微博/钉钉/企微/LINE 等。详见 [`scripts/cc-connect-setup.sh`](scripts/cc-connect-setup.sh)
+- [x] **一键 QR onboarding**：飞书 / 微信 ilink 都内置在安装脚本里
+- [ ] **微信原生语音气泡**：iLink Bot API 协议级限制——`@tencent-weixin/openclaw-weixin` 不暴露 `sendVoiceMessageWeixin`，外部 bot 发 voice item 永远 `ret=-2`。等腾讯放开（[chenhg5/cc-connect#763](https://github.com/chenhg5/cc-connect/issues/763)）
+- [ ] **微信 cron 主动推送**：`context_token` TTL 短，cron-driven daily-reminder 不保证送达。需要 cc-connect 实现 token 续期或换协议
+- [ ] **MiniMax 国际版**（`api.minimax.io`）
+- [ ] **更多 agent 模板**（办公助手、学习搭档…）
+- [ ] **共享 skill 库**：把 `nako/skills/` 里通用的 vision/hearing/voice/selfie 提取到 root 让多 agent 复用
 
 ## 贡献
 
