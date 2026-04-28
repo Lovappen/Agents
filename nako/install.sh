@@ -137,6 +137,45 @@ if [ -d "$AGENT_WORKSPACE" ] || [ -d "$AGENT_DIR" ]; then
   fi
 fi
 
+# ─── Provider preset (zai + sensenova) ─────────────────────────────────────
+# nako 的角色扮演首选 sensenova/SenseChat-Character-Agt，fallback zai/glm-4.7。
+# 这俩都不是 openclaw 内置 provider，得通过 openclaw.json 顶层 .models.providers
+# 注册成 openai-compatible provider。
+step "3a. Provider 预设 (zai + sensenova)"
+PRESET_FILE="$PACK_ROOT/config/providers-preset.json"
+if [ -f "$PRESET_FILE" ]; then
+  python3 - "$OPENCLAW_CONFIG" "$PRESET_FILE" <<'PY'
+import json, sys, os
+cfg_path, preset_path = sys.argv[1], sys.argv[2]
+cfg = json.load(open(cfg_path))
+preset = json.load(open(preset_path))
+models = cfg.setdefault("models", {})
+models.setdefault("mode", "merge")
+providers = models.setdefault("providers", {})
+added = []
+for name, def_ in preset.items():
+    if name in providers:
+        continue
+    providers[name] = def_
+    # 同时把每个 provider 的 default model 加到 agents.defaults.models
+    cfg.setdefault("agents", {}).setdefault("defaults", {}).setdefault("models", {})
+    for m in def_.get("models", []):
+        key = f"{name}/{m['id']}"
+        cfg["agents"]["defaults"]["models"].setdefault(key, {})
+    added.append(name)
+if added:
+    json.dump(cfg, open(cfg_path, "w"), indent=2, ensure_ascii=False)
+    open(cfg_path, "a").write("\n")
+    print(f"injected_providers={','.join(added)}")
+else:
+    print("providers_already_present")
+PY
+  info "provider preset 已注入（缺啥补啥，已有不动）"
+  dim "  下一步：openclaw model auth login --provider zai 或 sensenova（填 API key）"
+else
+  warn "config/providers-preset.json 不存在，跳过"
+fi
+
 # ─── Model selection ────────────────────────────────────────────────────────
 step "3. 模型匹配"
 
