@@ -54,7 +54,24 @@ while [ $# -gt 0 ]; do
     --non-interactive) NON_INTERACTIVE=1; shift ;;
     --agent-id) AGENT_ID="$2"; shift 2 ;;
     --display-name) DISPLAY_NAME="$2"; shift 2 ;;
-    -h|--help) grep -E "^#( |$)" "$0" | head -20; exit 0 ;;
+    -h|--help)
+      cat <<'HELP'
+cc-connect-setup.sh — 把 openclaw 上任意 agent 接到 cc-connect 多平台 host
+
+Usage:
+  curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/scripts/cc-connect-setup.sh | bash
+  curl -fsSL ... | bash -s -- --agent-id agent-foo --with-feishu --with-weixin
+  bash scripts/cc-connect-setup.sh [options]
+
+Flags:
+  --agent-id <id>      openclaw agent id (默认 agent-nako)
+  --display-name <n>   cc-connect 内显示名 (默认 "OpenClaw <id>")
+  --with-feishu        自动跑 feishu QR 引导（若未配 feishu）
+  --with-weixin        自动跑 weixin QR 引导（若未配 weixin）
+  --non-interactive    不询问，缺什么就跳过
+  -h, --help           本帮助
+HELP
+      exit 0 ;;
     *) err "Unknown flag: $1"; exit 1 ;;
   esac
 done

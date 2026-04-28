@@ -28,11 +28,23 @@ curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | b
 
 ## 与 agent 无关的工具
 
-`scripts/cc-connect-setup.sh` 单独可用，给任意 openclaw agent 做 cc-connect 多平台接入：
+### `scripts/cc-connect-setup.sh` — 给任意 openclaw agent 做 cc-connect 多平台接入
+
+也支持 curl 一键，参数走 `bash -s --` 传：
 
 ```bash
+# 交互问要不要装飞书/微信
+curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/scripts/cc-connect-setup.sh | bash
+
+# 指定 agent + 自动 QR 飞书 + 微信
+curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/scripts/cc-connect-setup.sh \
+  | bash -s -- --agent-id agent-foo --with-feishu --with-weixin
+
+# 本地 clone 后跑
 bash scripts/cc-connect-setup.sh --agent-id agent-foo --with-feishu --with-weixin
 ```
+
+完整 flag：`bash scripts/cc-connect-setup.sh --help`
 
 ## Roadmap
 

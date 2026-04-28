@@ -280,6 +280,14 @@ for f in AGENTS.md IDENTITY.md SOUL.md USER.md HEARTBEAT.md TOOLS.md; do
   safe_install_file "$PACK_ROOT/agent/$f" "$AGENT_WORKSPACE/$f"
 done
 
+# MEMORY.md (bootstrap): seed only if missing — runtime mutates it, never overwrite
+if [ ! -f "$AGENT_WORKSPACE/MEMORY.md" ]; then
+  cp "$PACK_ROOT/agent/MEMORY.md" "$AGENT_WORKSPACE/MEMORY.md"
+  dim "  + MEMORY.md (bootstrap 模板，运行时由 agent 自己滚动维护)"
+else
+  dim "  = MEMORY.md (保留用户运行时累积的记忆)"
+fi
+
 # custom.md: ONLY create if missing, NEVER overwrite
 if [ ! -f "$AGENT_WORKSPACE/custom.md" ]; then
   # minimal empty stub with comment pointing to example

@@ -23,34 +23,52 @@
 
 set -euo pipefail
 
-# ─── Resolve repo root (works for local clone or curl-piped) ────────────────
+AGENT="nako"
+PASS_ARGS=()
+LIST=0
+HELP=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --agent)            AGENT="$2"; shift 2 ;;
+    --list)             LIST=1; shift ;;
+    -h|--help)
+      cat <<'HELP'
+install.sh — Lovappen/Agents 一键安装入口
+
+Usage:
+  curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | bash
+  curl -fsSL ... | bash -s -- --agent nako --with-feishu
+  bash install.sh [options]
+
+Flags:
+  --agent <name>      要装哪个 agent (默认 nako；--list 看完整列表)
+  --with-cc-connect   装 cc-connect 但不自动 QR 任何平台
+  --with-feishu       装 cc-connect + QR 飞书
+  --with-weixin       装 cc-connect + QR 微信
+  --non-interactive   全程不询问
+  --force             override existing
+  --list              列出可用 agent 后退出
+  -h, --help          本帮助
+HELP
+      exit 0 ;;
+    --with-cc-connect|--with-feishu|--with-weixin|--non-interactive|--force)
+                        PASS_ARGS+=("$1"); shift ;;
+    *)                  PASS_ARGS+=("$1"); shift ;;
+  esac
+done
+
+# ─── Resolve repo root (lazy: only after we know we need files) ────────────
 if [ -n "${BASH_SOURCE:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 else
-  if ! command -v git >/dev/null; then
-    echo "git required" >&2; exit 1
-  fi
+  command -v git >/dev/null || { echo "git required" >&2; exit 1; }
   TMPDL=$(mktemp -d)
   trap 'rm -rf "$TMPDL"' EXIT
   echo "正在克隆 Lovappen/Agents → $TMPDL ..."
   git clone --depth 1 https://github.com/Lovappen/Agents.git "$TMPDL" >/dev/null 2>&1
   REPO_ROOT="$TMPDL"
 fi
-
-AGENT="nako"
-PASS_ARGS=()
-LIST=0
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --agent)            AGENT="$2"; shift 2 ;;
-    --list)             LIST=1; shift ;;
-    -h|--help)          grep -E "^#( |$)" "$0" | sed 's/^# \?//'; exit 0 ;;
-    --with-cc-connect|--with-feishu|--with-weixin|--non-interactive|--force)
-                        PASS_ARGS+=("$1"); shift ;;
-    *)                  PASS_ARGS+=("$1"); shift ;;
-  esac
-done
 
 if [ "$LIST" = "1" ]; then
   echo "可用 agent:"
