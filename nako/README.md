@@ -69,6 +69,7 @@ pwsh Agents\nako\install.ps1
 - MiniMax music 目前**仅支持国内版账号**（`api.minimaxi.com`）。国际版支持后续补。
 - Whisper 首次运行下模型（tiny ~72MB / turbo ~1.5GB）。
 - Windows 原生未经充分测试，推荐 WSL2。
+- **微信渠道**（通过 [cc-connect](https://github.com/chenhg5/cc-connect)）：语音永远是文件附件而非原生气泡（iLink Bot API 限制）；视频要原生卡片需用 fork [`CodeEagle/cc-connect@lazycat/v1.3.3`](https://github.com/CodeEagle/cc-connect/tree/lazycat/v1.3.3) + `ffmpeg`/`libavcodec-extra`。详见 [docs/troubleshooting.md](docs/troubleshooting.md#微信渠道cc-connect已知限制)。
 
 ## License
 

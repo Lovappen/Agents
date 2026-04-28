@@ -97,6 +97,7 @@ if [ "${#MISSING_SOFT[@]}" -gt 0 ]; then
   dim "  xxd / ffprobe    → voice skill"
   dim "  doki             → dokidoki skill"
   dim "macOS 建议：brew install openai-whisper ffmpeg ; npm i -g @tryjoy/dokidoki"
+  dim "Linux：sudo apt install ffmpeg libavcodec-extra（cc-connect 微信视频转码需要 AMR）"
   echo
 fi
 

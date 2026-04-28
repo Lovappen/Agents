@@ -103,6 +103,41 @@ cp ~/.openclaw/openclaw.json.bak-YYYYMMDD-HHMMSS ~/.openclaw/openclaw.json
 launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway
 ```
 
+## 微信渠道（cc-connect）已知限制
+
+通过 [cc-connect](https://github.com/chenhg5/cc-connect) 接微信个人号（iLink Bot API）时：
+
+| 类型 | 微信里显示 |
+|---|---|
+| 文本 | ✅ 原生 |
+| 图片 | ✅ 原生气泡（turn 内 token 新鲜） |
+| 视频 (mp4) | ✅ 原生视频卡片（turn 内 token 新鲜） |
+| 文件 (其他) | ✅ 文件附件 |
+| **语音 (mp3/wav)** | ❌ 永远是文件附件 |
+
+### 为什么语音不能是原生气泡
+
+iLink Bot 协议（`@tencent-weixin/openclaw-weixin@2.1.10`）的 `messaging/send.ts` **没有 `sendVoiceMessageWeixin` 函数** —— 腾讯只暴露了 text/image/video/file 四种 send。任何外部 bot 主动发 voice item 都会被 iLink server `ret=-2` 拒绝（见 [chenhg5/cc-connect#763](https://github.com/chenhg5/cc-connect/issues/763)）。这是腾讯协议级限制，不是 cc-connect bug，无法绕过。
+
+**解决**：让 nako 把语音作为文件附件发出（点开能播）。或在飞书/Telegram/Discord 等没有此限制的渠道用语音。
+
+### 视频要原生卡片需要 cc-connect fork
+
+upstream cc-connect v1.3.2 把 mp4 当文件发。fork [`CodeEagle/cc-connect@lazycat/v1.3.3`](https://github.com/CodeEagle/cc-connect/tree/lazycat/v1.3.3) 加了按 MIME/扩展名自动分流（`SendFile` → `SendVideo`）。
+
+```bash
+git clone -b lazycat/v1.3.3 https://github.com/CodeEagle/cc-connect.git
+cd cc-connect
+go build -tags no_web -ldflags "-s -w" -o cc-connect ./cmd/cc-connect
+sudo ln -sf "$PWD/cc-connect" /usr/local/bin/cc-connect
+```
+
+需要 `ffmpeg` + `libavcodec-extra`（AMR 编码器）在 PATH，否则 fork 在转码时报 `ffmpeg not found` 或 `Unknown encoder 'libopencore_amrnb'`。
+
+### context_token TTL
+
+每条 inbound 消息附带 `context_token`，被 cc-connect 缓存到 `~/.cc-connect/weixin/<project>/<bot>/context_tokens.json`。token 有较短 TTL（实测几分钟），过期后任何 outbound（含 text）都会 ret=-2。**只能在用户最近发消息后短窗口内主动推送** —— cron 触发的 daily-missing-reminder 等场景不保证送达。
+
 ## 提 Issue
 
 [github.com/Lovappen/Agents/issues](https://github.com/Lovappen/Agents/issues)
