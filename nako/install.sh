@@ -137,6 +137,43 @@ if [ "${#MISSING_SOFT[@]}" -gt 0 ]; then
       dim "  收到语音前装好就直接用；没装完时 hearing skill 会回 \"安装中\"，不阻塞 agent。"
     fi
   fi
+
+  # 默认装 doki（dokidoki BLE 设备控制；体积小，npm 几秒）
+  if echo "${MISSING_SOFT[@]}" | grep -q doki; then
+    if has_bin npm; then
+      info "doki 缺失，npm i -g @tryjoy/dokidoki ..."
+      npm i -g @tryjoy/dokidoki >/dev/null 2>&1 \
+        && info "doki 已装" \
+        || warn "doki 安装失败（可后续手动 npm i -g @tryjoy/dokidoki）"
+    else
+      warn "无 npm，跳过 doki 安装"
+    fi
+  fi
+fi
+
+# ─── Gateway preflight: ensure it's up early so cron / acp 后面都顺 ─────────
+step "1b. Gateway 预检"
+if openclaw cron list >/dev/null 2>&1; then
+  info "gateway 已在跑"
+else
+  info "gateway 未起，尝试自动启动..."
+  openclaw daemon install >/dev/null 2>&1 || true
+  openclaw daemon start   >/dev/null 2>&1 || true
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    openclaw cron list >/dev/null 2>&1 && { info "gateway 已通过 daemon 启动"; break; }
+    sleep 1
+  done
+  if ! openclaw cron list >/dev/null 2>&1; then
+    nohup openclaw gateway --auth none >/tmp/openclaw-gw.log 2>&1 &
+    disown 2>/dev/null || true
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      openclaw cron list >/dev/null 2>&1 && { info "gateway foreground 已起 (日志 /tmp/openclaw-gw.log)"; break; }
+      sleep 1
+    done
+  fi
+  if ! openclaw cron list >/dev/null 2>&1; then
+    warn "gateway 仍未起，后续 cron 注册会失败（手动 \`openclaw daemon install && openclaw daemon start\`）"
+  fi
 fi
 
 # ─── Existing agent check ───────────────────────────────────────────────────
@@ -450,33 +487,8 @@ step "7. 合并 openclaw.json"
 # ─── Register cron jobs (idempotent) ────────────────────────────────────────
 step "7b. 注册 cron jobs (heartbeat / daily-script / missing-reminder)"
 
-# cron 是 gateway-managed (WebSocket 18789)。先 ping，没起来自动尝试 daemon install+start，
-# 还不行再 fallback 后台 foreground，最后给手动指引。
 gateway_up=0
-gateway_check() { openclaw cron list >/dev/null 2>&1; }
-
-if has_bin openclaw && gateway_check; then
-  gateway_up=1
-elif has_bin openclaw; then
-  info "gateway 未起，尝试自动启动..."
-  # Try daemon (launchd/systemd)
-  openclaw daemon install >/dev/null 2>&1 || true
-  openclaw daemon start   >/dev/null 2>&1 || true
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    gateway_check && { gateway_up=1; info "gateway 已通过 daemon 启动"; break; }
-    sleep 1
-  done
-  # Fallback: nohup foreground
-  if [ "$gateway_up" = "0" ]; then
-    dim "  daemon 启动失败，fallback 到后台 foreground..."
-    nohup openclaw gateway --auth none >/tmp/openclaw-gw.log 2>&1 &
-    disown 2>/dev/null || true
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-      gateway_check && { gateway_up=1; info "gateway foreground (PID 见 /tmp/openclaw-gw.log)"; break; }
-      sleep 1
-    done
-  fi
-fi
+if has_bin openclaw && openclaw cron list >/dev/null 2>&1; then gateway_up=1; fi
 
 if [ "$gateway_up" = "0" ]; then
   warn "gateway 自动启动失败，跳过 cron 注册"
