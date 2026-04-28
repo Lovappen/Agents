@@ -563,24 +563,31 @@ if [ -d "$PACK_ROOT/agent/scripts" ]; then
   chmod +x "$AGENT_WORKSPACE/scripts/"*.sh 2>/dev/null || true
 fi
 
-# ─── Ensure auth-profiles.json for the fresh agent ────────────────────────
-# openclaw 每个 agent 的 agentDir/auth-profiles.json 独立存 API key。新 agent
-# 装好后这个文件不存在，sensenova/zai 调用直接挂"No API key found for provider"。
-# 从 main agent 复制（若有）作为种子，让新 agent 立刻能跑模型；用户可以后通过
-# `openclaw model auth login --provider <p>` 改 key。
-mkdir -p "$AGENT_DIR"
-if [ ! -f "$AGENT_DIR/auth-profiles.json" ]; then
-  for src in "$OPENCLAW_HOME/agents/main/agent/auth-profiles.json" \
-             "$OPENCLAW_HOME/agents/agent-yemu/agent/auth-profiles.json"; do
-    if [ -f "$src" ]; then
-      cp "$src" "$AGENT_DIR/auth-profiles.json"
-      info "auth-profiles.json 已从 $(basename "$(dirname "$src")")  复制"
-      break
+# ─── Ensure auth-profiles.json for the fresh agent + main agent ────────────
+# openclaw 默认 auth store 在 agents/main/agent/auth-profiles.json（per
+# `openclaw capability model auth status`），同时每个 agent 的 agentDir 自己
+# 也存一份。新 agent / fresh openclaw 这两个位置都可能空 → "No API key found
+# for provider"。把 auth-profiles.json 同时种到这两个位置。
+MAIN_DIR="$OPENCLAW_HOME/agents/main/agent"
+mkdir -p "$AGENT_DIR" "$MAIN_DIR"
+
+# 找一份可复制的种子 auth
+SEED_AUTH=""
+for src in "$MAIN_DIR/auth-profiles.json" \
+           "$OPENCLAW_HOME/agents/agent-yemu/agent/auth-profiles.json" \
+           "$OPENCLAW_HOME/agents/agent-yuanzhizhi/agent/auth-profiles.json"; do
+  if [ -f "$src" ] && [ -s "$src" ]; then SEED_AUTH="$src"; break; fi
+done
+
+if [ -n "$SEED_AUTH" ]; then
+  for tgt in "$MAIN_DIR/auth-profiles.json" "$AGENT_DIR/auth-profiles.json"; do
+    if [ ! -f "$tgt" ] || ! cmp -s "$SEED_AUTH" "$tgt"; then
+      cp "$SEED_AUTH" "$tgt"
+      info "auth-profiles.json 已写入 $(dirname "$tgt")"
     fi
   done
-  if [ ! -f "$AGENT_DIR/auth-profiles.json" ]; then
-    warn "未找到可复制的 auth-profiles.json — 跑 \`openclaw model auth login --provider zai\` 添加 key"
-  fi
+else
+  warn "未找到可复制的 auth-profiles.json — 跑 \`openclaw model auth login --provider zai\` 添加 key"
 fi
 
 # ─── Merge openclaw.json ────────────────────────────────────────────────────
