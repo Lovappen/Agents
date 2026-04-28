@@ -235,8 +235,12 @@ if [ "$NON_INTERACTIVE" = "1" ]; then
   : ${SELFIE_REFERENCE_IMAGE:=https://pulseact.lovappen.cn/test/act_ci_build/dlc-promotion/act-gengen/images/e.png}
   : ${SELFIE_CHARACTER_DESC:=}
 else
-  FEISHU_APP_ID=$(ask "飞书 App ID" "")
-  [ -n "$FEISHU_APP_ID" ] && FEISHU_APP_SECRET=$(ask_secret "飞书 App Secret") || FEISHU_APP_SECRET=""
+  # 飞书凭据：cc-connect 走 QR 扫码绑定（步骤 8 / --with-feishu），不在这里问。
+  # 这里默认置空，需要走 openclaw 原生 feishu channel 的高级用户可以装完后
+  # 编辑 <workspace>/skills/.env 手填。
+  FEISHU_APP_ID=""
+  FEISHU_APP_SECRET=""
+  dim "  飞书凭据 → 跳过（cc-connect QR 扫码绑定走步骤 8 / --with-feishu）"
   MINIMAX_API_KEY=$(ask_secret "MiniMax API Key (留空则禁用唱歌和 TTS)")
   [ -n "$MINIMAX_API_KEY" ] && MINIMAX_GROUP_ID=$(ask "MiniMax Group ID") || MINIMAX_GROUP_ID=""
   if confirm "配置火山引擎 TTS 作备选？" n; then
