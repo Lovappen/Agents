@@ -203,6 +203,13 @@ if ! openclaw config get gateway.mode >/dev/null 2>&1; then
   openclaw config set gateway.mode local >/dev/null 2>&1 && { info "已设 gateway.mode=local"; _changed_mode=1; }
 fi
 
+# 0b) bonjour 在容器/隔离网络/某些 macOS 上 mDNS announce 会触发
+#     Unhandled promise rejection (CIAO ANNOUNCEMENT CANCELLED) 干掉 gateway。
+#     默认禁掉，需要 LAN 发现的用户自行 enable。
+if openclaw plugins list 2>/dev/null | grep -qE "^[│|]?\s*bonjour\s+\S+\s+\S+\s+loaded"; then
+  openclaw plugins disable bonjour >/dev/null 2>&1 && { info "已禁 bonjour 插件 (容器/隔离网络稳定性)"; _changed_mode=1; }
+fi
+
 # 1) 若 gateway 已跑 + 我们刚改了 mode → 重启让新 config 生效
 if openclaw cron list >/dev/null 2>&1; then
   if [ "$_changed_mode" = "1" ]; then
