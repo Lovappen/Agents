@@ -23,6 +23,16 @@
 
 set -euo pipefail
 
+# PATH augment so child install.sh and openclaw/npm/node are reachable from
+# SSH default shells that don't load brew/nvm.
+[ -d /opt/homebrew/bin ] && export PATH="/opt/homebrew/bin:$PATH"
+[ -d /usr/local/bin    ] && export PATH="/usr/local/bin:$PATH"
+[ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH"
+if [ -d "$HOME/.nvm/versions/node" ]; then
+  NVM_LATEST=$(ls -1 "$HOME/.nvm/versions/node" 2>/dev/null | sort -V | tail -1 || true)
+  [ -n "${NVM_LATEST:-}" ] && export PATH="$HOME/.nvm/versions/node/$NVM_LATEST/bin:$PATH"
+fi
+
 AGENT="nako"
 PASS_ARGS=()
 LIST=0

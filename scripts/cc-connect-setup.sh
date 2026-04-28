@@ -19,6 +19,16 @@
 
 set -euo pipefail
 
+# ─── PATH augment for SSH 默认 shell（brew/nvm bin 不一定 inherits） ────────
+[ -d /opt/homebrew/bin ] && export PATH="/opt/homebrew/bin:$PATH"
+[ -d /usr/local/bin    ] && export PATH="/usr/local/bin:$PATH"
+[ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH"
+if [ -d "$HOME/.nvm/versions/node" ]; then
+  NVM_LATEST=$(ls -1 "$HOME/.nvm/versions/node" 2>/dev/null | sort -V | tail -1 || true)
+  [ -n "${NVM_LATEST:-}" ] && [ -d "$HOME/.nvm/versions/node/$NVM_LATEST/bin" ] && \
+    export PATH="$HOME/.nvm/versions/node/$NVM_LATEST/bin:$PATH"
+fi
+
 # ─── Self-contained logging / prompt helpers ────────────────────────────────
 if [ -t 1 ]; then
   C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'

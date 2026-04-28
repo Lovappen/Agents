@@ -14,6 +14,18 @@
 
 set -euo pipefail
 
+# ─── PATH augment: SSH 默认 shell 常常不带 brew/nvm 的 bin ──────────────────
+# 让 has_bin / 直接调用 npm/node/openclaw 都能找到，无论用户用 brew 还是 nvm 装。
+[ -d /opt/homebrew/bin ] && export PATH="/opt/homebrew/bin:$PATH"
+[ -d /usr/local/bin    ] && export PATH="/usr/local/bin:$PATH"
+[ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH"
+# nvm: 用最新一版 node 的 bin
+if [ -d "$HOME/.nvm/versions/node" ]; then
+  NVM_LATEST=$(ls -1 "$HOME/.nvm/versions/node" | sort -V | tail -1 || true)
+  [ -n "$NVM_LATEST" ] && [ -d "$HOME/.nvm/versions/node/$NVM_LATEST/bin" ] && \
+    export PATH="$HOME/.nvm/versions/node/$NVM_LATEST/bin:$PATH"
+fi
+
 # ─── Resolve pack root (works for local clone or curl-piped) ────────────────
 if [ -n "${BASH_SOURCE:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   PACK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
