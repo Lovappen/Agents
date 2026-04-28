@@ -398,11 +398,13 @@ if has_bin openclaw; then
     if openclaw cron list 2>/dev/null | grep -q "$name"; then
       dim "  = $name (已存在，跳过)"
     else
-      if openclaw cron add --name "$name" --agent "$AGENT_ID" --cron "$expr" \
-           --message "$msg" --session-key "agent:$AGENT_ID:main" >/dev/null 2>&1; then
+      _err=$(openclaw cron add --name "$name" --agent "$AGENT_ID" --cron "$expr" \
+           --message "$msg" --session-key "agent:$AGENT_ID:main" 2>&1 >/dev/null) && rc=0 || rc=$?
+      if [ "$rc" = "0" ]; then
         info "$name registered"
       else
-        warn "$name 注册失败（可手工 \`openclaw cron add\`）"
+        warn "$name 注册失败 (rc=$rc): $(echo "$_err" | head -2)"
+        dim "  手动重试：openclaw cron add --name $name --agent $AGENT_ID --cron \"$expr\" --message ... --session-key agent:$AGENT_ID:main"
       fi
     fi
   done
