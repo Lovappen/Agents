@@ -371,6 +371,7 @@ echo
 SHARED_ENV="$OPENCLAW_SKILLS_DIR/.env"
 AGENT_ENV="$AGENT_WORKSPACE/skills/.env"
 if [ "$RESET_SECRETS" != "1" ]; then
+  _reused=()
   for envfile in "$SHARED_ENV" "$AGENT_ENV"; do
     if [ -f "$envfile" ]; then
       # Source existing values into shell only if NOT already set by caller env
@@ -386,7 +387,7 @@ if [ "$RESET_SECRETS" != "1" ]; then
       done < <(grep -E "^[A-Z_]+=" "$envfile" 2>/dev/null)
     fi
   done
-  if [ ${#_reused[@]:-0} -gt 0 ]; then
+  if [ "${#_reused[@]}" -gt 0 ]; then
     info "复用旧凭据 (${#_reused[@]} 项): $(printf '%s ' "${_reused[@]}")"
     dim "  想重新输入跑 --reset-secrets。"
     echo
