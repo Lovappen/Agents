@@ -81,19 +81,15 @@ CC_CONFIG="$HOME/.cc-connect/config.toml"
 WORKSPACE="$HOME/.openclaw/workspace/$AGENT_ID"
 
 # ── 1. 装 cc-connect ──────────────────────────────────────────────────
+# 既然你跑了这个脚本，说明你想用 cc-connect — 默认直接装，不再问。
 step "1. 检查 cc-connect"
 if ! has_bin cc-connect; then
-  warn "cc-connect 未安装"
-  if [ "$NON_INTERACTIVE" = "1" ]; then
-    dim "  跳过（--non-interactive）。手装：npm i -g cc-connect"
-    exit 0
+  if ! has_bin npm; then
+    err "需要 npm 来装 cc-connect。先装 Node 22+ 再重跑（macOS: brew install node ；Linux: see https://nodejs.org）"
+    exit 1
   fi
-  if confirm "是否现在 npm i -g cc-connect？" y; then
-    npm i -g cc-connect 2>&1 | tail -5 || { err "cc-connect 安装失败"; exit 1; }
-  else
-    dim "已跳过。需要时手装：npm i -g cc-connect"
-    exit 0
-  fi
+  info "cc-connect 未装，npm i -g cc-connect ..."
+  npm i -g cc-connect 2>&1 | tail -3 || { err "cc-connect 安装失败"; exit 1; }
 fi
 info "cc-connect $(cc-connect --version 2>&1 | head -1 | awk '{print $2}')"
 

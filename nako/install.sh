@@ -389,21 +389,40 @@ step "7. 合并 openclaw.json"
 # ─── Register cron jobs (idempotent) ────────────────────────────────────────
 step "7b. 注册 cron jobs (heartbeat / daily-script / missing-reminder)"
 
-# 先 ping gateway，没起来就提示（cron 是 gateway-managed，没 gateway 一注册就 1006）
+# cron 是 gateway-managed (WebSocket 18789)。先 ping，没起来自动尝试 daemon install+start，
+# 还不行再 fallback 后台 foreground，最后给手动指引。
 gateway_up=0
-if has_bin openclaw; then
-  if openclaw cron list >/dev/null 2>&1; then
-    gateway_up=1
+gateway_check() { openclaw cron list >/dev/null 2>&1; }
+
+if has_bin openclaw && gateway_check; then
+  gateway_up=1
+elif has_bin openclaw; then
+  info "gateway 未起，尝试自动启动..."
+  # Try daemon (launchd/systemd)
+  openclaw daemon install >/dev/null 2>&1 || true
+  openclaw daemon start   >/dev/null 2>&1 || true
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    gateway_check && { gateway_up=1; info "gateway 已通过 daemon 启动"; break; }
+    sleep 1
+  done
+  # Fallback: nohup foreground
+  if [ "$gateway_up" = "0" ]; then
+    dim "  daemon 启动失败，fallback 到后台 foreground..."
+    nohup openclaw gateway --auth none >/tmp/openclaw-gw.log 2>&1 &
+    disown 2>/dev/null || true
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      gateway_check && { gateway_up=1; info "gateway foreground (PID 见 /tmp/openclaw-gw.log)"; break; }
+      sleep 1
+    done
   fi
 fi
 
 if [ "$gateway_up" = "0" ]; then
-  warn "gateway 未运行（127.0.0.1:18789 不可达），跳过 cron 注册"
-  dim "  先把 gateway 起来，再手动跑 cron 注册或重跑这一步："
-  dim "    macOS:  openclaw daemon install && openclaw daemon start"
-  dim "    Linux:  openclaw daemon install && systemctl --user start openclaw-gateway"
-  dim "    Dev:    openclaw gateway --auth none   # 前台运行，新开终端"
-  dim "  起来后："
+  warn "gateway 自动启动失败，跳过 cron 注册"
+  dim "  手动起后再 cron add，或重跑 installer："
+  dim "    openclaw daemon install && openclaw daemon start"
+  dim "    或：openclaw gateway --auth none  &"
+  dim "  cron 命令："
   for cron in "nako-heartbeat|*/30 * * * *" "nako-daily-script|0 8 * * *" "nako-missing-reminder|50 16 * * *"; do
     n="${cron%%|*}"; e="${cron#*|}"
     dim "    openclaw cron add --name $n --agent $AGENT_ID --cron \"$e\" --message ... --session-key agent:$AGENT_ID:main"
