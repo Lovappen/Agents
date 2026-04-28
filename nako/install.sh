@@ -388,7 +388,27 @@ step "7. 合并 openclaw.json"
 
 # ─── Register cron jobs (idempotent) ────────────────────────────────────────
 step "7b. 注册 cron jobs (heartbeat / daily-script / missing-reminder)"
+
+# 先 ping gateway，没起来就提示（cron 是 gateway-managed，没 gateway 一注册就 1006）
+gateway_up=0
 if has_bin openclaw; then
+  if openclaw cron list >/dev/null 2>&1; then
+    gateway_up=1
+  fi
+fi
+
+if [ "$gateway_up" = "0" ]; then
+  warn "gateway 未运行（127.0.0.1:18789 不可达），跳过 cron 注册"
+  dim "  先把 gateway 起来，再手动跑 cron 注册或重跑这一步："
+  dim "    macOS:  openclaw daemon install && openclaw daemon start"
+  dim "    Linux:  openclaw daemon install && systemctl --user start openclaw-gateway"
+  dim "    Dev:    openclaw gateway --auth none   # 前台运行，新开终端"
+  dim "  起来后："
+  for cron in "nako-heartbeat|*/30 * * * *" "nako-daily-script|0 8 * * *" "nako-missing-reminder|50 16 * * *"; do
+    n="${cron%%|*}"; e="${cron#*|}"
+    dim "    openclaw cron add --name $n --agent $AGENT_ID --cron \"$e\" --message ... --session-key agent:$AGENT_ID:main"
+  done
+elif has_bin openclaw; then
   for line in \
       "nako-heartbeat|*/30 * * * *|执行思念机制：bash $AGENT_WORKSPACE/scripts/heartbeat-check.sh，若退出码 1 则基于 memory/daily-script.md 和当前情绪生成一条主动思念消息发给主人，发送后任由 openclaw cron 路由到当前激活的 session/channel。" \
       "nako-daily-script|0 8 * * *|更新 memory/daily-script.md：参考前几日剧本生成今天的剧情（早午下晚四段），保持人物连续性、有生活感+恋爱气息，结尾加'角色状态'与'明日预告'。" \
