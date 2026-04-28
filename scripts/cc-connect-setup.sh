@@ -193,6 +193,20 @@ if [ "$WITH_FEISHU" = "0" ] && [ "$WITH_WEIXIN" = "0" ]; then
 fi
 
 echo
-info "cc-connect 配置完成"
-dim "启动 cc-connect: cc-connect"
-dim "之后 @ nako 在已绑定的平台里都能找她。"
+# ── 4. 启动 cc-connect (daemon 优先，fallback 后台 nohup) ────────────────
+step "4. 启动 cc-connect"
+if pgrep -f "cc-connect" >/dev/null 2>&1 && ! pgrep -f "cc-connect (feishu|weixin) setup" >/dev/null 2>&1; then
+  info "cc-connect 已在跑，跳过"
+else
+  if cc-connect daemon install --force >/dev/null 2>&1 && cc-connect daemon start >/dev/null 2>&1; then
+    info "cc-connect daemon 已启动 (launchd/systemd)"
+    dim "  状态: cc-connect daemon status   日志: cc-connect daemon logs -f"
+  else
+    nohup cc-connect >"$HOME/.cc-connect/cc-connect.log" 2>&1 &
+    disown 2>/dev/null || true
+    info "cc-connect 后台已启 (PID $!)，日志: ~/.cc-connect/cc-connect.log"
+  fi
+  sleep 2
+fi
+echo
+info "全部就绪 — 在已绑定的平台里 @ $AGENT_ID 找她"
