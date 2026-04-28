@@ -105,6 +105,36 @@ if [ "${#MISSING_SOFT[@]}" -gt 0 ]; then
   dim "macOS 建议：brew install openai-whisper ffmpeg ; npm i -g @tryjoy/dokidoki"
   dim "Linux：sudo apt install ffmpeg libavcodec-extra（cc-connect 微信视频转码需要 AMR）"
   echo
+
+  # 询问是否后台装 whisper
+  if echo "${MISSING_SOFT[@]}" | grep -q whisper; then
+    if [ "$NON_INTERACTIVE" = "1" ]; then
+      _do_whisper=0
+    elif confirm "需要语音识别（whisper）吗？现在后台安装（不阻塞）" y; then
+      _do_whisper=1
+    else
+      _do_whisper=0
+    fi
+    if [ "$_do_whisper" = "1" ]; then
+      mkdir -p "$OPENCLAW_HOME/skills/hearing"
+      MARKER="$OPENCLAW_HOME/skills/hearing/.installing"
+      LOGF="$OPENCLAW_HOME/skills/hearing/install.log"
+      touch "$MARKER"
+      OS=$(uname -s)
+      (
+        if [ "$OS" = "Darwin" ] && command -v brew >/dev/null; then
+          brew install openai-whisper ffmpeg
+        elif [ "$OS" = "Linux" ]; then
+          if command -v apt-get >/dev/null; then sudo apt-get install -y ffmpeg libavcodec-extra python3-pip; fi
+          pip install --user -U openai-whisper
+        fi
+        rm -f "$MARKER"
+      ) >"$LOGF" 2>&1 &
+      disown 2>/dev/null || true
+      info "whisper 后台安装中 (PID $!)，日志: $LOGF"
+      dim "  收到语音前装好就直接用；没装完时 hearing skill 会回 \"安装中\"，不阻塞 agent。"
+    fi
+  fi
 fi
 
 # ─── Existing agent check ───────────────────────────────────────────────────

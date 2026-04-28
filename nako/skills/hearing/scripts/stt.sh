@@ -33,7 +33,19 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 log_err()  { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 log_info() { echo -e "${GREEN}[INFO]${NC} $1" >&2; }
 
-[ -x "$WHISPER_BIN" ] || { log_err "whisper not found at $WHISPER_BIN — brew install openai-whisper"; exit 1; }
+# Check installation marker — if installer is still pulling whisper in background, tell agent.
+INSTALL_MARKER="$OPENCLAW_HOME/skills/hearing/.installing"
+if [ ! -x "$WHISPER_BIN" ] && ! command -v whisper >/dev/null 2>&1; then
+  if [ -f "$INSTALL_MARKER" ]; then
+    log_info "whisper 仍在后台安装中（marker: $INSTALL_MARKER），稍后再来"
+    printf '{"status":"installing","message":"语音识别功能正在后台安装，预计 1-3 分钟，安装完后我就能听懂语音了～"}\n'
+    exit 3
+  fi
+  log_err "whisper not found at $WHISPER_BIN — 跑 install.sh 重新装，或 brew install openai-whisper"
+  exit 1
+fi
+# Resolve whisper binary path
+[ -x "$WHISPER_BIN" ] || WHISPER_BIN="$(command -v whisper)"
 
 ARG="${1:-}"
 [ -z "$ARG" ] && { echo "Usage: $0 <file_key|--latest|/abs/path>" >&2; exit 1; }
