@@ -156,23 +156,44 @@ step "1b. Gateway 预检"
 if openclaw cron list >/dev/null 2>&1; then
   info "gateway 已在跑"
 else
+  # 0) 修复常见配置障碍：缺 gateway.mode 直接 block 启动
+  if ! openclaw config get gateway.mode >/dev/null 2>&1; then
+    openclaw config set gateway.mode local >/dev/null 2>&1 && info "已设 gateway.mode=local"
+  fi
+
   info "gateway 未起，尝试自动启动..."
-  openclaw daemon install >/dev/null 2>&1 || true
-  openclaw daemon start   >/dev/null 2>&1 || true
+  GW_LOG="/tmp/openclaw-gw-startup.log"
+  : > "$GW_LOG"
+
+  # 1) 优先 daemon
+  openclaw daemon install >>"$GW_LOG" 2>&1 || true
+  openclaw daemon start   >>"$GW_LOG" 2>&1 || true
   for i in 1 2 3 4 5 6 7 8 9 10; do
     openclaw cron list >/dev/null 2>&1 && { info "gateway 已通过 daemon 启动"; break; }
     sleep 1
   done
+
+  # 2) Fallback：foreground nohup
   if ! openclaw cron list >/dev/null 2>&1; then
-    nohup openclaw gateway --auth none >/tmp/openclaw-gw.log 2>&1 &
+    dim "  daemon 模式没起来，fallback 后台 foreground..."
+    nohup openclaw gateway --allow-unconfigured --auth none >>"$GW_LOG" 2>&1 &
     disown 2>/dev/null || true
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-      openclaw cron list >/dev/null 2>&1 && { info "gateway foreground 已起 (日志 /tmp/openclaw-gw.log)"; break; }
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      openclaw cron list >/dev/null 2>&1 && { info "gateway foreground 已起 (日志 $GW_LOG)"; break; }
       sleep 1
     done
   fi
+
+  # 3) 都失败 → 暴露日志末尾让用户看到真实错误
   if ! openclaw cron list >/dev/null 2>&1; then
-    warn "gateway 仍未起，后续 cron 注册会失败（手动 \`openclaw daemon install && openclaw daemon start\`）"
+    warn "gateway 仍未起，下面是启动日志末尾："
+    tail -8 "$GW_LOG" 2>&1 | sed "s/^/    /" >&2
+    dim "  完整日志：$GW_LOG"
+    dim "  常见原因 + 解法："
+    dim "    1. config 缺 gateway.mode → openclaw config set gateway.mode local"
+    dim "    2. 端口 18789 被占 → lsof -i :18789，杀掉再重试"
+    dim "    3. macOS launchd 权限问题 → openclaw doctor"
+    dim "    4. 手动起前台调试 → openclaw gateway --allow-unconfigured --auth none"
   fi
 fi
 
