@@ -2,11 +2,37 @@
 
 可一键部署到 [openclaw](https://openclaw.ai) 的 agent 集合。每个子目录是一个独立的 agent pack，含人设 + skill + 安装器 + 文档。
 
+## 一键安装
+
+```bash
+# 默认装 nako（目前唯一 agent），交互式问 cc-connect 接入
+curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | bash
+
+# 非交互 + QR 飞书一气呵成
+curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | bash -s -- --with-feishu
+
+# 选别的 agent
+curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | bash -s -- --agent <name>
+
+# 看可用 agent
+curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | bash -s -- --list
+```
+
+完整 flag：`bash install.sh --help`。
+
 ## 现有 Agents
 
-| Agent | 角色 | 渠道 | 快装 |
-|---|---|---|---|
-| [nako](nako/) | 战斗女仆 野木奈子 | 飞书 | `curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.sh \| bash` |
+| Agent | 角色 | 渠道 |
+|---|---|---|
+| [nako](nako/) | 战斗女仆 野木奈子 | 飞书 / 微信 / Telegram / Slack /...（via [cc-connect](https://github.com/chenhg5/cc-connect)） |
+
+## 与 agent 无关的工具
+
+`scripts/cc-connect-setup.sh` 单独可用，给任意 openclaw agent 做 cc-connect 多平台接入：
+
+```bash
+bash scripts/cc-connect-setup.sh --agent-id agent-foo --with-feishu --with-weixin
+```
 
 ## Roadmap
 
