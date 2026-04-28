@@ -33,7 +33,8 @@ ask() {
 
 ask_secret() {
   local question="$1"; local reply
-  echo -en "${C_CYAN}?${C_NC} $question ${C_DIM}(hidden)${C_NC}: "
+  # 提示更明显：输入隐藏 + 回车跳过
+  echo -en "${C_CYAN}?${C_NC} $question ${C_DIM}(输入隐藏；直接回车跳过)${C_NC}: "
   read -rs reply </dev/tty
   echo
   echo "$reply"

@@ -214,10 +214,13 @@ else
 fi
 
 # ─── Collect secrets ────────────────────────────────────────────────────────
-step "4. 收集凭据"
+step "4. 收集凭据 (可选)"
 
-dim "所有项可以回车跳过，对应能力会被标记 '未启用'。"
-dim "详见 docs/feishu-setup.md 获取飞书 App / docs/models.md 获取各 API key。"
+dim "下面会逐项问 5 类凭据：飞书 App、MiniMax、Volcengine、fal.ai、kie.ai。"
+dim "  - 任意项**直接回车**跳过，对应能力会被标记 '未启用'，不影响其他能力。"
+dim "  - API key 类输入是**隐藏**的（屏幕看不见但你确实在输入），不要以为卡住"
+dim "  - 全跳过也行：装完后随时通过 \$AGENT_WORKSPACE/skills/.env 补"
+dim "详见 docs/feishu-setup.md / docs/models.md。"
 echo
 
 if [ "$NON_INTERACTIVE" = "1" ]; then
