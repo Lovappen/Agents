@@ -142,9 +142,24 @@ if [ "${#MISSING_SOFT[@]}" -gt 0 ]; then
   if echo "${MISSING_SOFT[@]}" | grep -q doki; then
     if has_bin npm; then
       info "doki 缺失，npm i -g @tryjoy/dokidoki ..."
-      npm i -g @tryjoy/dokidoki >/dev/null 2>&1 \
-        && info "doki 已装" \
-        || warn "doki 安装失败（可后续手动 npm i -g @tryjoy/dokidoki）"
+      _doki_log=/tmp/doki-install.log
+      if npm i -g @tryjoy/dokidoki >"$_doki_log" 2>&1; then
+        info "doki 已装"
+      else
+        warn "doki 安装失败，日志末尾："
+        tail -5 "$_doki_log" 2>&1 | sed "s/^/    /" >&2
+        # 常见自救：EACCES → sudo 重试；EBADENGINE → 提示升级 node
+        if grep -q EACCES "$_doki_log"; then
+          dim "  权限不足。试 sudo: sudo npm i -g @tryjoy/dokidoki"
+          dim "  或修 npm prefix: npm config set prefix ~/.npm-global; export PATH=~/.npm-global/bin:\$PATH"
+        elif grep -q EBADENGINE "$_doki_log"; then
+          dim "  Node 版本不符（需要更高版本）。"
+        elif grep -qE "404|E404" "$_doki_log"; then
+          dim "  registry 找不到包，检查 npm 源：npm config get registry"
+        else
+          dim "  完整日志：$_doki_log"
+        fi
+      fi
     else
       warn "无 npm，跳过 doki 安装"
     fi
