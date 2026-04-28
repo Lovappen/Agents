@@ -153,14 +153,25 @@ fi
 
 # ─── Gateway preflight: ensure it's up early so cron / acp 后面都顺 ─────────
 step "1b. Gateway 预检"
-if openclaw cron list >/dev/null 2>&1; then
-  info "gateway 已在跑"
-else
-  # 0) 修复常见配置障碍：缺 gateway.mode 直接 block 启动
-  if ! openclaw config get gateway.mode >/dev/null 2>&1; then
-    openclaw config set gateway.mode local >/dev/null 2>&1 && info "已设 gateway.mode=local"
-  fi
 
+# 0) 修复常见配置障碍：缺 gateway.mode 直接 block 启动
+_changed_mode=0
+if ! openclaw config get gateway.mode >/dev/null 2>&1; then
+  openclaw config set gateway.mode local >/dev/null 2>&1 && { info "已设 gateway.mode=local"; _changed_mode=1; }
+fi
+
+# 1) 若 gateway 已跑 + 我们刚改了 mode → 重启让新 config 生效
+if openclaw cron list >/dev/null 2>&1; then
+  if [ "$_changed_mode" = "1" ]; then
+    info "重启 gateway 让新 config 生效..."
+    openclaw daemon restart >/dev/null 2>&1 || pkill -f openclaw-gateway 2>/dev/null
+    sleep 2
+  else
+    info "gateway 已在跑"
+  fi
+fi
+
+if ! openclaw cron list >/dev/null 2>&1; then
   info "gateway 未起，尝试自动启动..."
   GW_LOG="/tmp/openclaw-gw-startup.log"
   : > "$GW_LOG"
