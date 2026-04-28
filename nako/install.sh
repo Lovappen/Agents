@@ -38,6 +38,9 @@ AGENT_ID="agent-nako"
 NON_INTERACTIVE=0
 SKIP_SKILLS=0
 SKIP_MODELS=0
+WITH_CC_CONNECT=0
+WITH_FEISHU=0
+WITH_WEIXIN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -46,6 +49,9 @@ while [ $# -gt 0 ]; do
     --non-interactive) NON_INTERACTIVE=1; export NON_INTERACTIVE; shift ;;
     --skip-skills) SKIP_SKILLS=1; shift ;;
     --skip-models) SKIP_MODELS=1; shift ;;
+    --with-cc-connect) WITH_CC_CONNECT=1; shift ;;
+    --with-feishu)     WITH_FEISHU=1; WITH_CC_CONNECT=1; shift ;;
+    --with-weixin)     WITH_WEIXIN=1; WITH_CC_CONNECT=1; shift ;;
     -h|--help)
       grep -E "^# " "$0" | head -20; exit 0 ;;
     *) err "Unknown flag: $1"; exit 1 ;;
@@ -350,8 +356,18 @@ else
   warn "未发现 openclaw 命令，跳过 cron 注册"
 fi
 
+# ─── cc-connect 多平台 (可选) ──────────────────────────────────────────────
+if [ "$WITH_CC_CONNECT" = "1" ] || { [ "$NON_INTERACTIVE" != "1" ] && confirm "现在配置 cc-connect 接入飞书/微信等多平台？" n; }; then
+  step "8. cc-connect 多平台接入"
+  CC_FLAGS=(--agent-id "$AGENT_ID")
+  [ "$NON_INTERACTIVE" = "1" ] && CC_FLAGS+=(--non-interactive)
+  [ "$WITH_FEISHU" = "1" ]     && CC_FLAGS+=(--with-feishu)
+  [ "$WITH_WEIXIN" = "1" ]     && CC_FLAGS+=(--with-weixin)
+  bash "$SCRIPT_DIR/cc-connect-setup.sh" "${CC_FLAGS[@]}" || warn "cc-connect 配置未完成（可后续手动跑 nako/scripts/cc-connect-setup.sh）"
+fi
+
 # ─── Smoke test ─────────────────────────────────────────────────────────────
-step "8. 冒烟测试"
+step "9. 冒烟测试"
 "$SCRIPT_DIR/smoke-test.sh" || warn "部分项未通过，见上方日志"
 
 echo
