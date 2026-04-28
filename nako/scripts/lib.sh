@@ -20,12 +20,14 @@ dim()   { echo -e "${C_DIM}$*${C_NC}"; }
 
 # ───── Prompt helpers ─────
 # ask "question" [default]
+# 注意：prompt 必须打到 stderr (>&2)，否则会被调用方 $(ask ...) 的命令替换吃掉，
+# 用户屏幕上看不到任何提示，以为脚本卡死了。只有最终 reply 才走 stdout。
 ask() {
   local question="$1"; local default="${2:-}"; local reply
   if [ -n "$default" ]; then
-    echo -en "${C_CYAN}?${C_NC} $question ${C_DIM}[$default]${C_NC}: "
+    echo -en "${C_CYAN}?${C_NC} $question ${C_DIM}[$default]${C_NC}: " >&2
   else
-    echo -en "${C_CYAN}?${C_NC} $question: "
+    echo -en "${C_CYAN}?${C_NC} $question: " >&2
   fi
   read -r reply </dev/tty
   echo "${reply:-$default}"
@@ -33,10 +35,9 @@ ask() {
 
 ask_secret() {
   local question="$1"; local reply
-  # 提示更明显：输入隐藏 + 回车跳过
-  echo -en "${C_CYAN}?${C_NC} $question ${C_DIM}(输入隐藏；直接回车跳过)${C_NC}: "
+  echo -en "${C_CYAN}?${C_NC} $question ${C_DIM}(输入隐藏；直接回车跳过)${C_NC}: " >&2
   read -rs reply </dev/tty
-  echo
+  echo >&2
   echo "$reply"
 }
 
