@@ -9,7 +9,7 @@
 
 set -e
 
-WORKSPACE="${OPENCLAW_AGENT_WORKSPACE:-$HOME/.openclaw/workspace/agent-nako}"
+WORKSPACE="${OPENCLAW_AGENT_WORKSPACE:-$(cd "$(dirname "$0")/.." && pwd)}"
 LOG_DIR="$WORKSPACE/memory"
 mkdir -p "$LOG_DIR"
 
