@@ -14,6 +14,10 @@ curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.s
 
 ```powershell
 iex (iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.ps1).Content
+
+# cc-connect 飞书 QR
+$installer = [scriptblock]::Create((iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.ps1).Content)
+& $installer -WithFeishu
 ```
 
 或者克隆仓库本地跑：

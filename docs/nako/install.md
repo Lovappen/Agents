@@ -26,6 +26,12 @@ bash nako/install.sh
 | `--non-interactive` | 不交互；从环境变量读所有凭据 |
 | `--skip-skills` | 只装 agent 人设，跳过 skills |
 | `--skip-models` | 不做模型映射，沿用 `openclaw.json` 现有 primary |
+| `--reset-secrets` | 不复用已有 `.env` 凭据，重新按环境变量 / 交互输入写入 |
+| `--with-cc-connect` | 安装并配置 cc-connect project |
+| `--with-feishu` | 配置 cc-connect 并引导飞书 QR |
+| `--with-weixin` | 配置 cc-connect 并引导微信 QR |
+
+Windows PowerShell 对应参数使用 PascalCase，例如 `-ResetSecrets`、`-WithFeishu`、`-WithWeixin`。PowerShell 的 cc-connect 自动接入会调用仓库里的 `scripts/cc-connect-setup.sh`，因此需要 Git Bash / WSL 等可用的 `bash`。
 
 ## 非交互模式
 
@@ -50,6 +56,8 @@ $env:MINIMAX_API_KEY = "sk-xxx"
 $env:MINIMAX_GROUP_ID = "123"
 pwsh nako\install.ps1 -NonInteractive
 ```
+
+安装器会优先复用已有 `~/.openclaw/skills/.env` 与 `<workspace>/skills/.env` 中的凭据；需要重新输入时加 `--reset-secrets` / `-ResetSecrets`。
 
 ## 重装 / 升级
 

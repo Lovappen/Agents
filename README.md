@@ -51,6 +51,20 @@ bash scripts/cc-connect-setup.sh --agent-id agent-foo --with-feishu --with-weixi
 
 完整 flag：`bash scripts/cc-connect-setup.sh --help`
 
+### `scripts/nako-agent-factory/` — 局域网自助创建 Nako agent
+
+给一台 OpenClaw host 部署 8088 管理页：每个客户端 IP 只分配一个 `agent-nako-N`，页面生成 / 刷新飞书和微信二维码，并直接展示安装与 QR 日志。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/scripts/nako-agent-factory/install.sh | sudo bash
+
+# 或本地 clone 后跑
+cd scripts/nako-agent-factory
+sudo bash install.sh
+```
+
+打开 `http://<host-ip>:8088/` 后点击按钮即可创建或刷新当前 IP 对应的 agent。
+
 ## Roadmap
 
 - [x] **多平台接入**：飞书原生 + 通过 [cc-connect](https://github.com/chenhg5/cc-connect) 接微信/Telegram/Slack/Discord/QQ/微博/钉钉/企微/LINE 等。详见 [`scripts/cc-connect-setup.sh`](scripts/cc-connect-setup.sh)
