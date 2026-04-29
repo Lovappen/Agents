@@ -126,13 +126,10 @@ iLink Bot 协议（`@tencent-weixin/openclaw-weixin@2.1.10`）的 `messaging/sen
 upstream cc-connect v1.3.2 把 mp4 当文件发。fork [`CodeEagle/cc-connect@lazycat/v1.3.3`](https://github.com/CodeEagle/cc-connect/tree/lazycat/v1.3.3) 加了按 MIME/扩展名自动分流（`SendFile` → `SendVideo`）。
 
 ```bash
-git clone -b lazycat/v1.3.3 https://github.com/CodeEagle/cc-connect.git
-cd cc-connect
-go build -tags no_web -ldflags "-s -w" -o cc-connect ./cmd/cc-connect
-sudo ln -sf "$PWD/cc-connect" /usr/local/bin/cc-connect
+bash scripts/cc-connect-setup.sh --agent-id agent-nako --with-weixin --cc-connect-source lazycat
 ```
 
-需要 `ffmpeg` + `libavcodec-extra`（AMR 编码器）在 PATH，否则 fork 在转码时报 `ffmpeg not found` 或 `Unknown encoder 'libopencore_amrnb'`。
+安装脚本会优先下载 `CodeEagle/cc-connect` release 制品；没有对应平台制品时才尝试本机 Go 构建。需要 `ffmpeg` + `libavcodec-extra`（AMR 编码器）在 PATH，否则语音转码时报 `ffmpeg not found` 或 `Unknown encoder 'libopencore_amrnb'`。
 
 ### context_token TTL
 

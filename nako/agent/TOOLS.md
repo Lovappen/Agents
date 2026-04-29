@@ -35,7 +35,7 @@
 skill 脚本支持两种产物投递方式，由环境变量 `OPENCLAW_OUTPUT_MODE` 选择：
 
 - **`feishu`（默认，向后兼容）**：脚本生成文件后自己上传到飞书并 send。需要 `FEISHU_APP_ID/SECRET` + `<channel>` 是真实飞书 chat_id。
-- **`acp`（多平台 host 接管）**：脚本只生成文件，把 `{"type":"audio|image","path":"/abs/path",...}` 输出到 stdout，由 host（cc-connect / openclaw 多渠道层）按当前会话的真实平台投递。**适用于通过 cc-connect 接微信/微博/QQ 等非飞书渠道时**。
+- **`acp`（多平台 host 接管）**：脚本只生成文件，把 `{"type":"audio|image|video","path":"/abs/path",...}` 输出到 stdout，由 host（cc-connect / openclaw 多渠道层）按当前会话的真实平台投递。**适用于通过 cc-connect 接微信/微博/QQ 等非飞书渠道时**。
   - 此时 `<channel>` 参数随便填即可（如 `acp`），脚本不会用它发消息。
   - **agent 收到这类 JSON 后，把 `path` 直接在回复正文里以 `[文件: /tmp/xx.png]` 这种格式贴出来**，host 会拦截并替换成原生附件。
 

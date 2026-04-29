@@ -3,7 +3,7 @@
 ## 交互式安装
 
 ```bash
-bash nako/install.sh
+bash install.sh
 ```
 
 安装器 8 步：
@@ -30,8 +30,9 @@ bash nako/install.sh
 | `--with-cc-connect` | 安装并配置 cc-connect project |
 | `--with-feishu` | 配置 cc-connect 并引导飞书 QR |
 | `--with-weixin` | 配置 cc-connect 并引导微信 QR |
+| `--cc-connect-source auto\|npm\|lazycat\|skip` | cc-connect 来源；默认 `auto`，微信会优先下载 CodeEagle fork release |
 
-Windows PowerShell 对应参数使用 PascalCase，例如 `-ResetSecrets`、`-WithFeishu`、`-WithWeixin`。PowerShell 的 cc-connect 自动接入会调用仓库里的 `scripts/cc-connect-setup.sh`，因此需要 Git Bash / WSL 等可用的 `bash`。
+Windows PowerShell 对应参数使用 PascalCase，例如 `-ResetSecrets`、`-WithFeishu`、`-WithWeixin`、`-CcConnectSource lazycat`。PowerShell 的 cc-connect 自动接入会调用仓库里的 `scripts/cc-connect-setup.sh`，因此需要 Git Bash / WSL 等可用的 `bash`。
 
 ## 非交互模式
 
@@ -44,7 +45,7 @@ export MINIMAX_API_KEY=sk-xxx
 export MINIMAX_GROUP_ID=123
 export FAL_KEY=xxx
 export SELFIE_REFERENCE_IMAGE="https://..."
-bash nako/install.sh --non-interactive
+bash install.sh --non-interactive
 ```
 
 Windows:
@@ -54,7 +55,7 @@ $env:FEISHU_APP_ID = "cli_xxx"
 $env:FEISHU_APP_SECRET = "xxx"
 $env:MINIMAX_API_KEY = "sk-xxx"
 $env:MINIMAX_GROUP_ID = "123"
-pwsh nako\install.ps1 -NonInteractive
+pwsh install.ps1 -NonInteractive
 ```
 
 安装器会优先复用已有 `~/.openclaw/skills/.env` 与 `<workspace>/skills/.env` 中的凭据；需要重新输入时加 `--reset-secrets` / `-ResetSecrets`。

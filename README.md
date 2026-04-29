@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | b
 
 | Agent | 角色 | 渠道 |
 |---|---|---|
-| [nako](nako/) | 战斗女仆 野木奈子 | 飞书 / 微信 / Telegram / Slack /...（via [cc-connect](https://github.com/chenhg5/cc-connect)） |
+| [nako](nako/) | 战斗女仆 野木奈子 | 飞书 / 微信 / Telegram / Slack /...（via [cc-connect](https://github.com/chenhg5/cc-connect)，微信视频优先用 [CodeEagle fork release](https://github.com/CodeEagle/cc-connect/releases/tag/v1.3.3)） |
 
 ## 文档
 
