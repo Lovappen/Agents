@@ -1,5 +1,7 @@
 # 定制与调优
 
+本页是 nako 的快速定制速查。所有 agent 通用的进阶玩法见 [../advanced.md](../advanced.md)，nako 特色玩法见 [advanced.md](advanced.md)。
+
 ## 覆盖层顺序（优先级从低到高）
 
 ```

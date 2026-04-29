@@ -1,6 +1,6 @@
 # Agents
 
-可一键部署到 [openclaw](https://openclaw.ai) 的 agent 集合。每个子目录是一个独立的 agent pack，含人设 + skill + 安装器 + 文档。
+可一键部署到 [openclaw](https://openclaw.ai) 的 agent 集合。每个子目录是一个独立的 agent pack，含人设 + skill + 安装器；通用文档在 `docs/`，各 agent 特色文档在 `docs/<agent-name>/`。
 
 ## 一键安装
 
@@ -25,6 +25,11 @@ curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | b
 | Agent | 角色 | 渠道 |
 |---|---|---|
 | [nako](nako/) | 战斗女仆 野木奈子 | 飞书 / 微信 / Telegram / Slack /...（via [cc-connect](https://github.com/chenhg5/cc-connect)） |
+
+## 文档
+
+- [进阶玩法：Agent 通用自定义与调优](docs/advanced.md)
+- [nako 文档](docs/nako/README.md)
 
 ## 与 agent 无关的工具
 
@@ -69,15 +74,17 @@ your-agent/
 ├── skills/              # 本 agent 用到的 skill
 ├── config/
 │   └── model-map.yaml   # 按能力的模型候选表
-├── scripts/             # 安装器内部 helper
-└── docs/                # 用户文档
+└── scripts/             # 安装器内部 helper
+
+docs/
+└── your-agent/          # 该 agent 的用户文档与特色玩法
 ```
 
 新 pack 必须：
 - 不把任何真实 key / secret 提交进仓库（`.env.*.example` 仅占位）
 - 升级路径不破坏用户 `custom.md` / `memory/` / `sessions/`
 - 有 `scripts/smoke-test.sh` 冒烟脚本
-- 顶层 README 里加一行
+- 顶层 README 里加一行，并在 `docs/<agent-name>/` 放用户文档
 
 ## License
 

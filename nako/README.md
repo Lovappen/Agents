@@ -30,8 +30,8 @@ pwsh Agents\nako\install.ps1
 - 已安装 [openclaw](https://www.npmjs.com/package/openclaw) 且 `~/.openclaw` 存在
 - macOS / Linux: `jq curl python3 uuidgen`（安装器会检查）
 - Windows 10+: PowerShell 7+、`python`、`jq`、`curl`
-- 一个飞书自建应用（[创建教程](docs/feishu-setup.md)）
-- 至少一个对话模型已配在 `openclaw.json`（最好是 `sensenova/SenseChat-Character-Agt`，详见 [models.md](docs/models.md)）
+- 一个飞书自建应用（[创建教程](../docs/nako/feishu-setup.md)）
+- 至少一个对话模型已配在 `openclaw.json`（最好是 `sensenova/SenseChat-Character-Agt`，详见 [models.md](../docs/nako/models.md)）
 
 ## 功能一览
 
@@ -45,12 +45,14 @@ pwsh Agents\nako\install.ps1
 
 ## 文档
 
-- [install.md](docs/install.md) — 安装详解 / 非交互模式 / 排错
-- [feishu-setup.md](docs/feishu-setup.md) — 建飞书机器人
-- [models.md](docs/models.md) — 模型选型 / 多模型切换 / 加新模型
-- [skills.md](docs/skills.md) — 每个 skill 用法 + 参数
-- [customization.md](docs/customization.md) — 改人设 / 换音色 / custom.md
-- [troubleshooting.md](docs/troubleshooting.md) — 常见错误
+- [install.md](../docs/nako/install.md) — 安装详解 / 非交互模式 / 排错
+- [feishu-setup.md](../docs/nako/feishu-setup.md) — 建飞书机器人
+- [models.md](../docs/nako/models.md) — 模型选型 / 多模型切换 / 加新模型
+- [skills.md](../docs/nako/skills.md) — 每个 skill 用法 + 参数
+- [customization.md](../docs/nako/customization.md) — 改人设 / 换音色 / custom.md
+- [advanced.md](../docs/advanced.md) — 通用进阶玩法 / 深度调优 / 自定义 agent
+- [nako/advanced.md](../docs/nako/advanced.md) — nako 特色玩法
+- [troubleshooting.md](../docs/nako/troubleshooting.md) — 常见错误
 
 ## 升级不会吃掉你的数据
 
@@ -69,7 +71,7 @@ pwsh Agents\nako\install.ps1
 - MiniMax music 目前**仅支持国内版账号**（`api.minimaxi.com`）。国际版支持后续补。
 - Whisper 首次运行下模型（tiny ~72MB / turbo ~1.5GB）。
 - Windows 原生未经充分测试，推荐 WSL2。
-- **微信渠道**（通过 [cc-connect](https://github.com/chenhg5/cc-connect)）：语音永远是文件附件而非原生气泡（iLink Bot API 限制）；视频要原生卡片需用 fork [`CodeEagle/cc-connect@lazycat/v1.3.3`](https://github.com/CodeEagle/cc-connect/tree/lazycat/v1.3.3) + `ffmpeg`/`libavcodec-extra`。详见 [docs/troubleshooting.md](docs/troubleshooting.md#微信渠道cc-connect已知限制)。
+- **微信渠道**（通过 [cc-connect](https://github.com/chenhg5/cc-connect)）：语音永远是文件附件而非原生气泡（iLink Bot API 限制）；视频要原生卡片需用 fork [`CodeEagle/cc-connect@lazycat/v1.3.3`](https://github.com/CodeEagle/cc-connect/tree/lazycat/v1.3.3) + `ffmpeg`/`libavcodec-extra`。详见 [docs/nako/troubleshooting.md](../docs/nako/troubleshooting.md#微信渠道cc-connect已知限制)。
 
 ## License
 

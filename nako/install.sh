@@ -370,7 +370,7 @@ dim "下面会逐项问 5 类凭据：飞书 App、MiniMax、Volcengine、fal.ai
 dim "  - 任意项**直接回车**跳过，对应能力会被标记 '未启用'，不影响其他能力。"
 dim "  - API key 类输入是**隐藏**的（屏幕看不见但你确实在输入），不要以为卡住"
 dim "  - 全跳过也行：装完后随时通过 \$AGENT_WORKSPACE/skills/.env 补"
-dim "详见 docs/feishu-setup.md / docs/models.md。"
+dim "详见仓库根目录 docs/nako/feishu-setup.md / docs/nako/models.md。"
 echo
 
 # Reuse existing secrets from prior install (unless --reset-secrets)
@@ -667,4 +667,4 @@ dim "下一步："
 dim "  1. 重启 gateway: launchctl kickstart -k gui/\$(id -u)/ai.openclaw.gateway  (macOS)"
 dim "  2. 在飞书里 @ $AGENT_ID 或私聊它"
 dim "  3. 要定制：编辑 $AGENT_WORKSPACE/custom.md（升级不会动它）"
-dim "  4. 文档：$PACK_ROOT/docs/"
+dim "  4. 文档：仓库根目录 docs/nako/ 和 docs/advanced.md"
