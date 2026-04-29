@@ -511,7 +511,7 @@ def repair_nako_cc_projects() -> list:
             "command": 'command = "openclaw"',
             "args": f'args = ["acp", "--session", "agent:{name}:main"]',
             "display_name": f'display_name = "OpenClaw {name}"',
-            "env": 'env = { OPENCLAW_OUTPUT_MODE = "acp" }',
+            "env": f'env = {{ OPENCLAW_OUTPUT_MODE = "acp", OPENCLAW_CCCONNECT_PROJECT = "{name}" }}',
         }
         additions = [line for key, line in needed.items()
                      if not re.search(rf"(?m)^{key}\s*=", section)]
