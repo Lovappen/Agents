@@ -1,0 +1,1007 @@
+#!/usr/bin/env python3
+"""
+Nako agent factory — LAN HTTP service to provision new nako agents on demand.
+
+Endpoints:
+  GET  /                  → simple HTML page
+  POST /create            → alloc next agent-nako-N, install, return QR URLs
+  GET  /status?id=N       → progress + QR + recent log for agent-nako-N
+  GET  /log?id=N          → full text log for agent-nako-N
+  GET  /qr?id=N&platform= → returns QR image file (feishu|weixin)
+
+Deps: only Python 3 stdlib + the host's openclaw/cc-connect/curl/bash.
+
+Listen: 0.0.0.0:8088 (override with NAKO_SERVER_PORT env).
+"""
+import http.server, socketserver, json, os, re, socket, subprocess, threading, time, urllib.parse, fcntl, ipaddress, shutil
+from pathlib import Path
+try:
+    import tomllib
+except ImportError:
+    tomllib = None
+
+PORT       = int(os.environ.get("NAKO_SERVER_PORT", 8088))
+HOME       = Path(os.path.expanduser("~"))
+COUNTER    = HOME / ".nako-counter"
+INSTALL_URL= "https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh"
+JOB_DIR    = HOME / ".nako-jobs"
+IP_INDEX   = JOB_DIR / "ip-index.json"
+CC_CONFIG  = HOME / ".cc-connect/config.toml"
+LOG_TAIL_BYTES = int(os.environ.get("NAKO_LOG_TAIL_BYTES", "30000"))
+JOB_DIR.mkdir(exist_ok=True)
+QR_PLATFORMS = ("feishu", "weixin")
+OPENCLAW_GATEWAY_PORT = int(os.environ.get("OPENCLAW_GATEWAY_PORT", "18789"))
+OPENCLAW_GATEWAY_HEAP_MB = os.environ.get("OPENCLAW_GATEWAY_HEAP_MB", "2048")
+OPENCLAW_WATCHDOG_INTERVAL = int(os.environ.get("NAKO_GATEWAY_WATCHDOG_INTERVAL", "10"))
+TRUSTED_PROXY_CIDRS = tuple(
+    ipaddress.ip_network(c.strip())
+    for c in os.environ.get("NAKO_TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128,172.16.0.0/12").split(",")
+    if c.strip()
+)
+
+LOCK = threading.RLock()
+QR_PROCS = {}
+JOB_GENERATIONS = {}
+CC_RESTART_LOCK = threading.RLock()
+CC_RESTART_TIMER = None
+OPENCLAW_GATEWAY_LOCK = threading.RLock()
+
+
+def alloc_id() -> int:
+    """Atomic increment of the counter file."""
+    with LOCK:
+        n = 0
+        if COUNTER.exists():
+            try: n = int(COUNTER.read_text().strip() or "0")
+            except: n = 0
+        n += 1
+        COUNTER.write_text(str(n))
+        return n
+
+
+def load_ip_index() -> dict:
+    if not IP_INDEX.exists():
+        return {}
+    try:
+        data = json.loads(IP_INDEX.read_text())
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_ip_index(index: dict):
+    IP_INDEX.write_text(json.dumps(index, ensure_ascii=False, indent=2))
+
+
+def parse_ip(value: str):
+    if not value:
+        return None
+    value = value.strip().strip('"').strip("'")
+    if value.lower() == "unknown" or value.startswith("_"):
+        return None
+    if value.startswith("[") and "]" in value:
+        value = value[1:value.index("]")]
+    elif value.count(":") == 1 and "." in value:
+        value = value.split(":", 1)[0]
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return None
+
+
+def trusted_proxy(peer_ip: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(peer_ip)
+    except ValueError:
+        return False
+    return any(ip in net for net in TRUSTED_PROXY_CIDRS)
+
+
+def forwarded_header_ip(headers):
+    xff = headers.get("X-Forwarded-For")
+    if xff:
+        for part in xff.split(","):
+            ip = parse_ip(part)
+            if ip:
+                return ip
+
+    for name in ("X-Real-IP", "CF-Connecting-IP", "True-Client-IP"):
+        ip = parse_ip(headers.get(name))
+        if ip:
+            return ip
+
+    forwarded = headers.get("Forwarded")
+    if forwarded:
+        for entry in forwarded.split(","):
+            for part in entry.split(";"):
+                key, sep, val = part.strip().partition("=")
+                if sep and key.lower() == "for":
+                    ip = parse_ip(val)
+                    if ip:
+                        return ip
+    return None
+
+
+def client_ip_from_request(handler) -> str:
+    peer_ip = parse_ip(handler.client_address[0]) or handler.client_address[0]
+    if trusted_proxy(peer_ip):
+        return forwarded_header_ip(handler.headers) or peer_ip
+    return peer_ip
+
+
+def ensure_cc_connect_config():
+    if CC_CONFIG.exists():
+        return
+    CC_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    CC_CONFIG.write_text('[log]\nlevel = "info"\n')
+    os.chmod(CC_CONFIG, 0o600)
+
+
+def agent_id_for(n: int) -> str:
+    return f"agent-nako-{n}"
+
+
+def job_state(n: int) -> dict:
+    p = JOB_DIR / f"agent-nako-{n}.json"
+    if not p.exists(): return {"id": n, "status": "unknown"}
+    try: return json.loads(p.read_text())
+    except: return {"id": n, "status": "corrupt"}
+
+
+def log_path_for(n: int) -> Path:
+    aid = job_state(n).get("agent_id") or f"agent-nako-{n}"
+    return JOB_DIR / f"{aid}.log"
+
+
+def read_log_tail(n: int, max_bytes: int = LOG_TAIL_BYTES) -> str:
+    p = log_path_for(n)
+    if not p.exists():
+        return ""
+    with p.open("rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(max(0, size - max_bytes), os.SEEK_SET)
+        data = f.read()
+    return data.decode("utf-8", errors="replace")
+
+
+def status_payload(n: int) -> dict:
+    state = job_state(n)
+    aid = state.get("agent_id") or agent_id_for(n)
+    if state.get("status") not in ("unknown", "corrupt"):
+        state.setdefault("agent_id", aid)
+
+    bound = bound_platforms_for_agent(aid)
+    state["bound_platforms"] = sorted(bound)
+    state["unbound_platforms"] = [plat for plat in QR_PLATFORMS if plat not in bound]
+    with LOCK:
+        active_qr = any(proc.poll() is None for proc in QR_PROCS.get(n, []))
+    if state.get("status") == "awaiting_scan" and not active_qr:
+        next_status = "qr_expired" if state["unbound_platforms"] else "ready"
+        state["status"] = next_status
+        state["qr_refresh_in_progress"] = False
+        write_state(n, status=next_status, qr_refresh_in_progress=False)
+    requested = set(state.get("cc_reload_platforms") or [])
+    if bound and bound != requested:
+        schedule_reload_for_bound_platforms(
+            n, bound, tool_env(), reason=f"{aid}:status-bound-{','.join(sorted(bound))}"
+        )
+
+    for plat in QR_PLATFORMS:
+        p = JOB_DIR / f"{aid}-{plat}.png"
+        if p.exists():
+            state[f"{plat}_qr_image"] = f"/qr?id={n}&platform={plat}&v={int(p.stat().st_mtime)}"
+
+    p = log_path_for(n)
+    if p.exists():
+        state["log_url"] = f"/log?id={n}"
+        state["log_tail"] = read_log_tail(n)
+    return state
+
+
+def write_state(n: int, **kv):
+    with LOCK:
+        JOB_DIR.mkdir(exist_ok=True)
+        p = JOB_DIR / f"agent-nako-{n}.json"
+        cur = job_state(n)
+        cur.update(kv)
+        cur["id"] = n
+        p.write_text(json.dumps(cur, ensure_ascii=False, indent=2))
+
+
+def valid_secret(value) -> bool:
+    if not isinstance(value, str):
+        return bool(value)
+    value = value.strip()
+    return bool(value) and not value.startswith("your-")
+
+
+def bound_platforms_for_agent(aid: str) -> set:
+    if tomllib is None or not CC_CONFIG.exists():
+        return set()
+    try:
+        data = tomllib.loads(CC_CONFIG.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+
+    bound = set()
+    for project in data.get("projects", []) or []:
+        if project.get("name") != aid:
+            continue
+        for platform in project.get("platforms", []) or []:
+            ptype = platform.get("type")
+            opts = platform.get("options", {}) or {}
+            if ptype in ("feishu", "lark"):
+                if valid_secret(opts.get("app_id")) and valid_secret(opts.get("app_secret")):
+                    bound.add("feishu")
+            elif ptype == "weixin":
+                if valid_secret(opts.get("token")):
+                    bound.add("weixin")
+    return bound
+
+
+def unbound_platforms_for_agent(aid: str) -> list:
+    bound = bound_platforms_for_agent(aid)
+    return [plat for plat in QR_PLATFORMS if plat not in bound]
+
+
+def should_refresh_qr(n: int) -> bool:
+    state = job_state(n)
+    if state.get("status") in ("queued", "installing"):
+        return False
+    aid = state.get("agent_id") or agent_id_for(n)
+    return bool(unbound_platforms_for_agent(aid))
+
+
+def next_generation(n: int) -> int:
+    with LOCK:
+        cur = JOB_GENERATIONS.get(n)
+        if cur is None:
+            try:
+                cur = int(job_state(n).get("qr_generation") or 0)
+            except Exception:
+                cur = 0
+        cur += 1
+        JOB_GENERATIONS[n] = cur
+        write_state(n, qr_generation=cur)
+        return cur
+
+
+def generation_current(n: int, generation: int) -> bool:
+    with LOCK:
+        cur = JOB_GENERATIONS.get(n)
+    if cur is None:
+        try:
+            cur = int(job_state(n).get("qr_generation") or 0)
+        except Exception:
+            cur = 0
+    return cur == generation
+
+
+def register_qr_proc(n: int, proc):
+    with LOCK:
+        QR_PROCS.setdefault(n, []).append(proc)
+
+
+def unregister_qr_proc(n: int, proc):
+    with LOCK:
+        procs = QR_PROCS.get(n, [])
+        if proc in procs:
+            procs.remove(proc)
+        if not procs:
+            QR_PROCS.pop(n, None)
+
+
+def stop_qr_processes(n: int):
+    with LOCK:
+        procs = list(QR_PROCS.pop(n, []))
+    for proc in procs:
+        if proc.poll() is None:
+            proc.terminate()
+    deadline = time.time() + 3
+    for proc in procs:
+        while proc.poll() is None and time.time() < deadline:
+            time.sleep(0.05)
+        if proc.poll() is None:
+            proc.kill()
+
+
+def tool_env() -> dict:
+    env = os.environ.copy()
+    home = os.path.expanduser("~")
+    extra = ["/opt/homebrew/bin", "/usr/local/bin"]
+    nvm = Path(home) / ".nvm/versions/node"
+    if nvm.exists():
+        latest = sorted(nvm.iterdir(), key=lambda p: p.name)[-1]
+        extra.insert(0, str(latest / "bin"))
+    env["PATH"] = ":".join(extra) + ":" + env.get("PATH", "")
+    return env
+
+
+def cc_connect_main_pids() -> list:
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,args="], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True, check=False).stdout
+    except Exception:
+        return []
+
+    pids = []
+    main_re = re.compile(r"(?:^|\s)(?:node\s+)?\S*/cc-connect(?:\s+--force)?\s*$")
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        pid_s, _, args = line.partition(" ")
+        try:
+            pid = int(pid_s)
+        except ValueError:
+            continue
+        if "cc-connect" not in args:
+            continue
+        if main_re.search(args):
+            pids.append(pid)
+    return pids
+
+
+def stop_cc_connect():
+    pids = cc_connect_main_pids()
+    for pid in pids:
+        try:
+            os.kill(pid, 15)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            pass
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        live = [pid for pid in pids if Path(f"/proc/{pid}").exists()]
+        if not live:
+            return
+        time.sleep(0.1)
+
+    for pid in pids:
+        try:
+            os.kill(pid, 9)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            pass
+
+
+def openclaw_client_pids() -> list:
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,args="], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True, check=False).stdout
+    except Exception:
+        return []
+
+    pids = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        pid_s, _, args = line.partition(" ")
+        try:
+            pid = int(pid_s)
+        except ValueError:
+            continue
+        if "openclaw" not in args:
+            continue
+        if "openclaw-gateway" in args or re.search(r"(^|\s)openclaw\s+gateway\s+run(\s|$)", args):
+            continue
+        is_client = (
+            re.search(r"(^|\s)openclaw-acp(\s|$)", args)
+            or re.search(r"(^|\s)(?:node\s+)?\S*/?openclaw\s+acp(\s|$)", args)
+            or re.fullmatch(r"(?:node\s+)?\S*/?openclaw", args)
+        )
+        if is_client:
+            pids.append(pid)
+    return pids
+
+
+def stop_openclaw_clients() -> list:
+    pids = openclaw_client_pids()
+    for pid in pids:
+        try:
+            os.kill(pid, 15)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            pass
+
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        live = [pid for pid in pids if Path(f"/proc/{pid}").exists()]
+        if not live:
+            return pids
+        time.sleep(0.1)
+
+    for pid in pids:
+        try:
+            os.kill(pid, 9)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            pass
+    return pids
+
+
+def prune_empty_cc_projects() -> list:
+    if not CC_CONFIG.exists():
+        return []
+
+    try:
+        text = CC_CONFIG.read_text(encoding="utf-8")
+    except Exception:
+        return []
+
+    parts = re.split(r"(?m)(?=^\[\[projects\]\]\s*$)", text)
+    if len(parts) <= 1:
+        return []
+
+    kept = []
+    removed = []
+    for part in parts:
+        if not part.startswith("[[projects]]"):
+            kept.append(part)
+            continue
+        name_match = re.search(r'(?m)^name\s*=\s*"([^"]+)"\s*$', part)
+        name = name_match.group(1) if name_match else ""
+        has_platform = re.search(r"(?m)^\[\[projects\.platforms\]\]\s*$", part) is not None
+        if name.startswith("agent-nako-") and not has_platform:
+            removed.append(name)
+            continue
+        kept.append(part)
+
+    if not removed:
+        return []
+
+    backup = CC_CONFIG.parent / f"config.toml.bak-prune-{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        backup.write_text(text, encoding="utf-8")
+        CC_CONFIG.write_text("".join(kept), encoding="utf-8")
+        os.chmod(CC_CONFIG, 0o600)
+    except Exception:
+        return []
+    return removed
+
+
+def repair_nako_cc_projects() -> list:
+    if not CC_CONFIG.exists():
+        return []
+
+    try:
+        text = CC_CONFIG.read_text(encoding="utf-8")
+    except Exception:
+        return []
+
+    parts = re.split(r"(?m)(?=^\[\[projects\]\]\s*$)", text)
+    if len(parts) <= 1:
+        return []
+
+    kept = []
+    repaired = []
+    for part in parts:
+        if not part.startswith("[[projects]]"):
+            kept.append(part)
+            continue
+
+        name_match = re.search(r'(?m)^name\s*=\s*"([^"]+)"\s*$', part)
+        name = name_match.group(1) if name_match else ""
+        if not name.startswith("agent-nako-") or "[[projects.platforms]]" not in part:
+            kept.append(part)
+            continue
+
+        original = part
+        if "[projects.agent.options]" not in part:
+            insert = '\n[projects.agent]\ntype = "acp"\n\n[projects.agent.options]\n'
+            marker = "\n[[projects.platforms]]"
+            if marker in part:
+                part = part.replace(marker, insert + marker, 1)
+            else:
+                part = part.rstrip() + insert
+
+        opt = part.index("[projects.agent.options]")
+        rest_start = opt + len("[projects.agent.options]")
+        next_table = re.search(r"(?m)^\[", part[rest_start:])
+        insert_at = len(part) if next_table is None else rest_start + next_table.start()
+        section = part[opt:insert_at]
+        needed = {
+            "command": 'command = "openclaw"',
+            "args": f'args = ["acp", "--session", "agent:{name}:main"]',
+            "display_name": f'display_name = "OpenClaw {name}"',
+            "env": 'env = { OPENCLAW_OUTPUT_MODE = "acp" }',
+        }
+        additions = [line for key, line in needed.items()
+                     if not re.search(rf"(?m)^{key}\s*=", section)]
+        if additions:
+            part = part[:insert_at].rstrip() + "\n" + "\n".join(additions) + "\n" + part[insert_at:]
+
+        if part != original:
+            repaired.append(name)
+        kept.append(part)
+
+    if not repaired:
+        return []
+
+    backup = CC_CONFIG.parent / f"config.toml.bak-repair-{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        backup.write_text(text, encoding="utf-8")
+        CC_CONFIG.write_text("".join(kept), encoding="utf-8")
+        os.chmod(CC_CONFIG, 0o600)
+    except Exception:
+        return []
+    return repaired
+
+
+def tcp_port_open(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def openclaw_gateway_env(env: dict) -> dict:
+    gw_env = env.copy()
+    gw_env.setdefault("NODE_COMPILE_CACHE", "/var/tmp/openclaw-compile-cache")
+    gw_env.setdefault("OPENCLAW_NO_RESPAWN", "1")
+    node_options = gw_env.get("NODE_OPTIONS", "")
+    heap_option = f"--max-old-space-size={OPENCLAW_GATEWAY_HEAP_MB}"
+    if "--max-old-space-size" not in node_options:
+        gw_env["NODE_OPTIONS"] = (node_options + " " + heap_option).strip()
+    Path(gw_env["NODE_COMPILE_CACHE"]).mkdir(parents=True, exist_ok=True)
+    return gw_env
+
+
+def ensure_openclaw_gateway(env: dict) -> bool:
+    port = OPENCLAW_GATEWAY_PORT
+    if tcp_port_open("127.0.0.1", port):
+        return True
+
+    with OPENCLAW_GATEWAY_LOCK:
+        if tcp_port_open("127.0.0.1", port):
+            return True
+
+        gw_env = openclaw_gateway_env(env)
+        if shutil.which("openclaw", path=gw_env.get("PATH")) is None:
+            return False
+        gw_log = Path("/tmp/openclaw/openclaw-gateway.log")
+        gw_log.parent.mkdir(parents=True, exist_ok=True)
+        with gw_log.open("ab") as f:
+            subprocess.Popen(["openclaw", "gateway", "run", "--port", str(port), "--bind", "loopback"],
+                             stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                             env=gw_env, start_new_session=True)
+
+        deadline = time.time() + 45
+        while time.time() < deadline:
+            if tcp_port_open("127.0.0.1", port):
+                return True
+            time.sleep(1)
+    return False
+
+
+def gateway_watchdog():
+    while True:
+        port = OPENCLAW_GATEWAY_PORT
+        was_up = tcp_port_open("127.0.0.1", port)
+        if not was_up:
+            stop_openclaw_clients()
+        ok = ensure_openclaw_gateway(tool_env())
+        if ok and not was_up:
+            schedule_cc_connect_restart(tool_env(), reason="gateway-watchdog", delay=35.0)
+        time.sleep(OPENCLAW_WATCHDOG_INTERVAL)
+
+
+def start_cc_connect(env: dict, reason: str = ""):
+    with CC_RESTART_LOCK:
+        log = HOME / ".cc-connect/cc-connect.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        removed = prune_empty_cc_projects()
+        repaired = repair_nako_cc_projects()
+        gateway_ok = ensure_openclaw_gateway(env)
+
+        stop_cc_connect()
+        stopped_openclaw = stop_openclaw_clients()
+        with log.open("ab") as f:
+            note = f"\n=== nako restart cc-connect reason={reason or 'reload'} gateway_ok={gateway_ok} ===\n"
+            f.write(note.encode("utf-8"))
+            if stopped_openclaw:
+                f.write(("=== stopped stale openclaw clients: " + ", ".join(map(str, stopped_openclaw)) + " ===\n").encode("utf-8"))
+            if removed:
+                f.write(("=== pruned empty projects: " + ", ".join(removed) + " ===\n").encode("utf-8"))
+            if repaired:
+                f.write(("=== repaired projects: " + ", ".join(repaired) + " ===\n").encode("utf-8"))
+            subprocess.Popen(["cc-connect"], stdout=f, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, env=env, start_new_session=True)
+
+
+def schedule_cc_connect_restart(env: dict, reason: str = "", delay: float = 2.0):
+    global CC_RESTART_TIMER
+    env_copy = env.copy()
+    with CC_RESTART_LOCK:
+        if CC_RESTART_TIMER is not None:
+            CC_RESTART_TIMER.cancel()
+        CC_RESTART_TIMER = threading.Timer(delay, start_cc_connect, args=(env_copy, reason))
+        CC_RESTART_TIMER.daemon = True
+        CC_RESTART_TIMER.start()
+
+
+def schedule_reload_for_bound_platforms(n: int, bound: set, env: dict, reason: str) -> bool:
+    if not bound:
+        return False
+    desired = set(bound)
+    current = set(job_state(n).get("cc_reload_platforms") or [])
+    if desired == current:
+        return False
+    write_state(n, cc_reload_platforms=sorted(desired))
+    schedule_cc_connect_restart(env, reason=reason)
+    return True
+
+
+def existing_job_for_ip(client_ip: str, index: dict):
+    raw = index.get(client_ip)
+    if raw is None:
+        return None
+    try:
+        n = int(raw)
+    except Exception:
+        index.pop(client_ip, None)
+        return None
+    if (JOB_DIR / f"agent-nako-{n}.json").exists():
+        return n
+    index.pop(client_ip, None)
+    return None
+
+
+def create_or_get_job_for_ip(client_ip: str):
+    client_ip = client_ip or "unknown"
+    with LOCK:
+        index = load_ip_index()
+        n = existing_job_for_ip(client_ip, index)
+        if n is not None:
+            return n, True, client_ip
+
+        n = alloc_id()
+        aid = f"agent-nako-{n}"
+        write_state(n, status="queued", agent_id=aid, client_ip=client_ip)
+        index[client_ip] = n
+        save_ip_index(index)
+        return n, False, client_ip
+
+
+def run_install_and_qr(n: int, force_qr: bool = False, generation: int = None):
+    """Background worker: install agent when needed, then run QR onboarding."""
+    aid = agent_id_for(n)
+    log = JOB_DIR / f"{aid}.log"
+    env = tool_env()
+    if generation is None:
+        generation = next_generation(n)
+    ensure_cc_connect_config()
+
+    state = job_state(n)
+    install_needed = state.get("install_rc") != 0
+    if install_needed:
+        write_state(n, status="installing", agent_id=aid, qr_generation=generation)
+        with log.open("w") as f:
+            # Install (idempotent)
+            rc = subprocess.run(
+                ["bash", "-c",
+                 f"set -o pipefail; curl -fsSL {INSTALL_URL} | bash -s -- --agent-id {aid} --non-interactive --force --with-cc-connect"],
+                stdout=f, stderr=subprocess.STDOUT, env=env).returncode
+            f.write(f"\n=== install rc={rc} ===\n")
+
+        if rc != 0:
+            if generation_current(n, generation):
+                write_state(n, status="install_failed", install_rc=rc)
+            return
+
+        write_state(n, status="installed", install_rc=rc)
+
+    if not generation_current(n, generation):
+        return
+
+    platforms = unbound_platforms_for_agent(aid)
+    if not platforms:
+        bound = bound_platforms_for_agent(aid)
+        write_state(n, status="ready", qr_refresh_in_progress=False,
+                    bound_platforms=sorted(bound),
+                    unbound_platforms=[])
+        schedule_reload_for_bound_platforms(n, bound, env, reason=f"{aid}:already-bound")
+        return
+
+    with log.open("a") as f:
+        f.write(f"\n=== qr generation {generation} force={force_qr} ===\n")
+
+    clear_qr = {}
+    for plat in platforms:
+        qr_path = JOB_DIR / f"{aid}-{plat}.png"
+        try:
+            qr_path.unlink()
+        except FileNotFoundError:
+            pass
+        clear_qr[f"{plat}_qr_url"] = None
+        clear_qr[f"{plat}_qr_image"] = None
+        clear_qr[f"{plat}_rc"] = None
+    write_state(n, status="generating_qr", agent_id=aid, qr_generation=generation,
+                qr_refresh_in_progress=True, **clear_qr)
+
+    procs = []
+    url_patterns = {
+        "feishu": r"https://open\.feishu\.cn/[^\s]+",
+        "weixin": r"https://(?:liteapp|weixin)\.weixin\.qq\.com/[^\s]+",
+    }
+
+    for plat in platforms:
+        if not generation_current(n, generation):
+            return
+        qr_path = JOB_DIR / f"{aid}-{plat}.png"
+        proc = subprocess.Popen(
+            ["bash", "-c",
+             f"cc-connect {plat} new --project {aid} --qr-image {qr_path} --timeout 480"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True)
+        register_qr_proc(n, proc)
+        procs.append((plat, proc))
+
+        qr_url = None
+        deadline = time.time() + 20
+        while time.time() < deadline and qr_url is None:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            with log.open("a") as f:
+                f.write(f"[{plat}] " + line)
+            m = re.search(url_patterns[plat], line)
+            if m:
+                qr_url = m.group(0)
+
+        write_state(n, **{
+            f"{plat}_qr_url": qr_url,
+            f"{plat}_qr_image": str(qr_path) if qr_path.exists() else None,
+        })
+
+    if not generation_current(n, generation):
+        return
+
+    write_state(n, status="awaiting_scan")
+
+    rc_updates = {}
+    remaining = {plat: proc for plat, proc in procs}
+    last_bound = set()
+    while remaining:
+        if not generation_current(n, generation):
+            return
+
+        for plat, proc in list(remaining.items()):
+            rc = proc.poll()
+            if rc is None:
+                continue
+            rc_updates[f"{plat}_rc"] = rc
+            try:
+                rest = proc.stdout.read()
+            except Exception:
+                rest = ""
+            if rest:
+                with log.open("a") as f:
+                    for line in rest.splitlines(True):
+                        f.write(f"[{plat}] " + line)
+            unregister_qr_proc(n, proc)
+            remaining.pop(plat, None)
+
+        bound_now = bound_platforms_for_agent(aid)
+        unbound_now = [plat for plat in QR_PLATFORMS if plat not in bound_now]
+        write_state(n, bound_platforms=sorted(bound_now), unbound_platforms=unbound_now,
+                    **rc_updates)
+        if bound_now and bound_now != last_bound:
+            with log.open("a") as f:
+                f.write(f"\n=== detected bound platforms: {', '.join(sorted(bound_now))}; scheduling cc-connect reload ===\n")
+            schedule_reload_for_bound_platforms(
+                n, bound_now, env, reason=f"{aid}:bound-{','.join(sorted(bound_now))}"
+            )
+            last_bound = set(bound_now)
+
+        if remaining:
+            time.sleep(2)
+
+    if not generation_current(n, generation):
+        return
+
+    bound = bound_platforms_for_agent(aid)
+    unbound = [plat for plat in QR_PLATFORMS if plat not in bound]
+    write_state(n, status="ready" if not unbound else "qr_expired",
+                qr_refresh_in_progress=False,
+                bound_platforms=sorted(bound),
+                unbound_platforms=unbound,
+                **rc_updates)
+    if bound:
+        schedule_reload_for_bound_platforms(n, bound, env, reason=f"{aid}:qr-finished")
+
+
+def start_worker(n: int, force_qr: bool = False, reason: str = "") -> bool:
+    generation = next_generation(n)
+    if force_qr:
+        state = job_state(n)
+        aid = state.get("agent_id") or agent_id_for(n)
+        clear_qr = {}
+        for plat in unbound_platforms_for_agent(aid):
+            try:
+                (JOB_DIR / f"{aid}-{plat}.png").unlink()
+            except FileNotFoundError:
+                pass
+            clear_qr[f"{plat}_qr_url"] = None
+            clear_qr[f"{plat}_qr_image"] = None
+            clear_qr[f"{plat}_rc"] = None
+        write_state(n, status="generating_qr", qr_refresh_in_progress=True, **clear_qr)
+        stop_qr_processes(n)
+    t = threading.Thread(target=run_install_and_qr, args=(n, force_qr, generation), daemon=True)
+    t.start()
+    return True
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def _json(self, code, obj):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps(obj, ensure_ascii=False).encode())
+
+    def do_GET(self):
+        u = urllib.parse.urlparse(self.path)
+        q = urllib.parse.parse_qs(u.query)
+        if u.path == "/":
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write("""<!doctype html><html lang="zh-CN"><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Nako Factory</title>
+<style>
+:root{color-scheme:light;--bg:#f6f7f9;--panel:#fff;--text:#17202a;--muted:#687385;--line:#dde3ea;--accent:#2563eb;--accent-dark:#1d4ed8;--ok:#0f8a5f;--warn:#a16207;--bad:#b42318;--shadow:0 14px 36px rgba(20,30,45,.08)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Microsoft YaHei",sans-serif}.page{width:min(1120px,100%);margin:0 auto;padding:28px 18px 36px}.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}.brand h1{margin:0;font-size:26px;line-height:1.2;letter-spacing:0}.brand p{margin:6px 0 0;color:var(--muted)}button{border:0;border-radius:8px;background:var(--accent);color:#fff;padding:11px 16px;font-weight:700;font-size:15px;cursor:pointer;white-space:nowrap;box-shadow:0 8px 18px rgba(37,99,235,.18)}button:hover{background:var(--accent-dark)}button:disabled{cursor:wait;opacity:.72}.summary{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 18px}.pill{display:inline-flex;align-items:center;min-height:30px;border:1px solid var(--line);border-radius:999px;background:#fff;padding:4px 10px;color:var(--muted);font-size:13px}.pill strong{color:var(--text);font-weight:700}.status-ready{color:var(--ok)}.status-working{color:var(--accent)}.status-warn{color:var(--warn)}.status-bad{color:var(--bad)}.qr-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:18px}.qr-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:18px}.qr-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.qr-title{font-size:18px;font-weight:800}.qr-state{font-size:13px;color:var(--muted);white-space:nowrap}.qr-wrap{display:grid;place-items:center;min-height:286px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc}.qr{width:min(260px,78vw);height:min(260px,78vw);image-rendering:pixelated}.qr-placeholder{display:flex;min-height:260px;align-items:center;justify-content:center;flex-direction:column;text-align:center;color:var(--muted);padding:22px}.qr-placeholder strong{display:block;color:var(--text);font-size:18px;margin-top:12px}.qr-placeholder span{display:block;margin-top:4px}.spinner{width:34px;height:34px;border-radius:999px;border:3px solid #dbe4ef;border-top-color:var(--accent);animation:spin 1s linear infinite}.check{display:grid;place-items:center;width:42px;height:42px;border-radius:999px;background:#e7f7ef;color:var(--ok);font-size:26px;font-weight:900}.qr-link{margin:12px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.qr-link a{color:var(--accent);text-decoration:none}.qr-link a:hover{text-decoration:underline}.hint{margin:0 0 18px;color:var(--muted)}.details{display:grid;gap:10px;margin-top:10px}details{background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow)}summary{cursor:pointer;padding:13px 16px;font-weight:800}pre{margin:0;border-top:1px solid var(--line);background:#0f172a;color:#dbeafe;padding:14px 16px;max-height:340px;overflow:auto;white-space:pre-wrap;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.empty{background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:26px;color:var(--muted)}@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:760px){.page{padding:20px 12px 28px}.topbar{display:block}.topbar button{width:100%;margin-top:14px}.qr-grid{grid-template-columns:1fr}.qr-wrap{min-height:240px}.qr-placeholder{min-height:220px}.brand h1{font-size:23px}}
+</style></head>
+<body><main class=page><div class=topbar><div class=brand><h1>Nako Agent Factory</h1><p>同一个客户端 IP 只会分配一个 agent；未绑定时再次点击会刷新二维码。</p></div><button id=createBtn onclick="create()">生成 / 刷新二维码</button></div><div id=out><div class=empty>点击按钮后开始安装并生成飞书、微信二维码。</div></div></main>
+<script>
+let timer=null;
+const platforms=[
+  {key:'feishu',name:'飞书',desc:'使用飞书 / Lark 手机 App 扫码绑定'},
+  {key:'weixin',name:'微信',desc:'使用微信扫码连接 ilink 机器人'}
+];
+const finalStatuses=['ready','qr_expired','install_failed','unknown','corrupt'];
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function statusLabel(s){return ({queued:'排队中',installing:'安装中',installed:'已安装',generating_qr:'生成二维码中',awaiting_scan:'等待扫码',ready:'就绪',qr_expired:'二维码已过期',install_failed:'安装失败',unknown:'未知',corrupt:'状态损坏'})[s]||s||'未知';}
+function statusClass(s){if(s==='ready')return'status-ready';if(s==='install_failed'||s==='corrupt')return'status-bad';if(s==='qr_expired'||s==='unknown')return'status-warn';return'status-working';}
+function isBound(j,key){return (j.bound_platforms||[]).includes(key);}
+function isUnbound(j,key){return (j.unbound_platforms||[]).includes(key);}
+function summaryHTML(j){
+  return [
+    '<span class="pill '+statusClass(j.status)+'"><strong>状态：</strong>'+esc(statusLabel(j.status))+'</span>',
+    '<span class=pill><strong>Agent：</strong>'+esc(j.agent_id||'-')+'</span>',
+    '<span class=pill><strong>IP：</strong>'+esc(j.client_ip||'-')+'</span>'
+  ].join('');
+}
+function hintText(j){
+  const unbound=(j.unbound_platforms||[]).map(x=>platforms.find(p=>p.key===x)?.name||x).join('、');
+  return unbound?('未绑定：'+unbound+'。二维码超时后再次点击上方按钮即可刷新。'):'飞书和微信均已绑定。';
+}
+function qrHTML(j){return platforms.map(p=>renderQR(j,p)).join('');}
+function renderQR(j,p){
+  const img=j[p.key+'_qr_image'];
+  const url=j[p.key+'_qr_url'];
+  const bound=isBound(j,p.key);
+  const working=['queued','installing','installed','generating_qr','awaiting_scan'].includes(j.status)||j.qr_refresh_in_progress;
+  let body='';
+  let state=bound?'已绑定':(working?'正在生成':'待生成');
+  if(img){
+    body='<img class=qr src="'+esc(img)+'" alt="'+esc(p.name)+'二维码">';
+    state=bound?'已绑定':'待扫码';
+  }else if(bound){
+    body='<div class=qr-placeholder><div class=check>✓</div><strong>已绑定</strong><span>'+esc(p.name)+' 已可使用</span></div>';
+  }else{
+    body='<div class=qr-placeholder><div class=spinner></div><strong>正在生成二维码</strong><span>'+esc(p.desc)+'</span></div>';
+  }
+  const link=url?'<p class=qr-link><a href="'+esc(url)+'" target="_blank" rel="noreferrer">'+esc(url)+'</a></p>':'<p class=qr-link><span class=muted>链接生成后会显示在这里</span></p>';
+  return '<section class=qr-card><div class=qr-head><div class=qr-title>'+esc(p.name)+'</div><div class=qr-state>'+esc(state)+'</div></div><div class=qr-wrap>'+body+'</div>'+link+'</section>';
+}
+function render(j){
+  document.getElementById('out').innerHTML='<div id=qrGrid class=qr-grid>'+qrHTML(j)+'</div><div id=summary class=summary>'+summaryHTML(j)+'</div><p id=hint class=hint>'+esc(hintText(j))+'</p><div class=details><details id=infoDetails><summary>运行信息</summary><pre id=info></pre></details><details id=logDetails><summary>安装 / 二维码日志</summary><pre id=log></pre></details></div>';
+  updateDetails(j,true);
+}
+function updateDetails(j,forceScroll){
+  const info=document.getElementById('info');
+  if(info) info.textContent=JSON.stringify(j,null,2);
+  const log=document.getElementById('log');
+  if(log){
+    const atBottom=log.scrollTop+log.clientHeight>=log.scrollHeight-24;
+    log.textContent=j.log_tail||'暂无日志';
+    if(forceScroll||atBottom) log.scrollTop=log.scrollHeight;
+  }
+}
+function updateLive(j){
+  const qr=document.getElementById('qrGrid');
+  if(!qr){render(j);return;}
+  qr.innerHTML=qrHTML(j);
+  const summary=document.getElementById('summary');
+  if(summary) summary.innerHTML=summaryHTML(j);
+  const hint=document.getElementById('hint');
+  if(hint) hint.textContent=hintText(j);
+  updateDetails(j,false);
+}
+async function create(){
+  const btn=document.getElementById('createBtn');
+  btn.disabled=true;btn.textContent='处理中...';
+  try{
+    const r=await fetch('/create',{method:'POST'});const j=await r.json();
+    render(j);
+    poll(j.id);
+  }finally{
+    btn.disabled=false;btn.textContent='生成 / 刷新二维码';
+  }
+}
+async function poll(id){
+  if(timer) clearTimeout(timer);
+  const r=await fetch('/status?id='+id);const j=await r.json();
+  updateLive(j);
+  if(!finalStatuses.includes(j.status)){
+    timer=setTimeout(()=>poll(id),2000);
+  }
+}
+</script></body></html>""".encode("utf-8"))
+            return
+        if u.path == "/status":
+            try: n = int(q.get("id", ["0"])[0])
+            except: return self._json(400, {"error": "bad id"})
+            return self._json(200, status_payload(n))
+        if u.path == "/log":
+            try: n = int(q.get("id", ["0"])[0])
+            except: return self._json(400, {"error": "bad id"})
+            p = log_path_for(n)
+            if not p.exists(): return self._json(404, {"error": "log not ready"})
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(p.read_text(errors="replace").encode("utf-8"))
+            return
+        if u.path == "/qr":
+            try: n = int(q.get("id", ["0"])[0])
+            except: return self._json(400, {"error": "bad id"})
+            plat = q.get("platform", ["feishu"])[0]
+            if plat not in QR_PLATFORMS: return self._json(400, {"error": "bad platform"})
+            p = JOB_DIR / f"agent-nako-{n}-{plat}.png"
+            if not p.exists(): return self._json(404, {"error": "qr not ready"})
+            self.send_response(200); self.send_header("Content-Type", "image/png"); self.end_headers()
+            self.wfile.write(p.read_bytes())
+            return
+        return self._json(404, {"error": "not found"})
+
+    def do_POST(self):
+        if self.path == "/create":
+            client_ip = client_ip_from_request(self)
+            n, existing, client_ip = create_or_get_job_for_ip(client_ip)
+            refresh_started = False
+            if not existing:
+                refresh_started = start_worker(n, force_qr=False, reason="new")
+            elif should_refresh_qr(n):
+                refresh_started = start_worker(n, force_qr=True, reason="refresh")
+            code = 200 if existing else 202
+            payload = status_payload(n)
+            payload.update({"id": n, "agent_id": agent_id_for(n),
+                            "client_ip": client_ip, "existing": existing,
+                            "qr_refresh_started": refresh_started,
+                            "status_url": f"/status?id={n}",
+                            "log_url": f"/log?id={n}",
+                            "next": "GET /status?id={} 查看状态和日志".format(n)})
+            return self._json(code, payload)
+        return self._json(404, {"error": "not found"})
+
+    def log_message(self, fmt, *a):
+        print(f"[{self.address_string()}] {fmt%a}")
+
+
+class ReusableTCP(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+if __name__ == "__main__":
+    print(f"Nako factory listening on 0.0.0.0:{PORT}")
+    print(f"Open: http://<this-host>:{PORT}/")
+    threading.Thread(target=gateway_watchdog, daemon=True).start()
+    ReusableTCP(("0.0.0.0", PORT), Handler).serve_forever()

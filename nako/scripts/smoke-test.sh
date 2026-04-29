@@ -22,6 +22,28 @@ check() {
   fi
 }
 
+has_env_key() {
+  local key="$1" file="${2:-$SKILLS/.env}"
+  grep -qE "^${key}=.+" "$file" 2>/dev/null
+}
+
+has_openclaw_skill_env_key() {
+  local skill="$1" key="$2"
+  python3 - "$OPENCLAW_HOME/openclaw.json" "$skill" "$key" <<'PY' 2>/dev/null
+import json
+import sys
+from pathlib import Path
+
+path, skill, key = sys.argv[1:4]
+try:
+    data = json.loads(Path(path).read_text())
+except Exception:
+    raise SystemExit(1)
+env = (((data.get("skills") or {}).get("entries") or {}).get(skill) or {}).get("env") or {}
+raise SystemExit(0 if env.get(key) else 1)
+PY
+}
+
 # Vision
 if [ -x "$SKILLS/vision/scripts/resolve.sh" ]; then
   if [ -d "$OPENCLAW_HOME/media/inbound" ] && ls "$OPENCLAW_HOME/media/inbound"/*.{jpg,png,webp} >/dev/null 2>&1; then
@@ -82,11 +104,11 @@ fi
 
 # Selfie
 if [ -x "$SKILLS/selfie/scripts/selfie.sh" ]; then
-  if grep -qE "^FAL_KEY=.+" "$SKILLS/.env" 2>/dev/null || grep -qE "^KIE_API_KEY=.+" "$SKILLS/.env" 2>/dev/null; then
+  if has_env_key FAL_KEY || has_env_key KIE_API_KEY || has_openclaw_skill_env_key selfie FAL_KEY || has_openclaw_skill_env_key selfie KIE_API_KEY; then
     info "selfie: 图像生成 key 已配"
     PASS=$((PASS+1))
   else
-    dim "selfie: 未配 FAL_KEY / KIE_API_KEY，自拍不可用（可选）"
+    dim "selfie: 未配 FAL_KEY / KIE_API_KEY，自拍不可用（可选；支持 $SKILLS/.env 或 openclaw.json skills.entries.selfie.env）"
     SKIP=$((SKIP+1))
   fi
 fi

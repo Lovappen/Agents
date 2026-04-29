@@ -2,7 +2,7 @@
 #
 # Usage:
 #   iex (iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.ps1).Content
-#   # or: pwsh nako\install.ps1 [-Force] [-AgentId agent-nako] [-NonInteractive] [-SkipSkills] [-SkipModels]
+#   # or: pwsh nako\install.ps1 [-Force] [-AgentId agent-nako] [-NonInteractive] [-SkipSkills] [-SkipModels] [-ResetSecrets] [-WithFeishu] [-WithWeixin]
 
 [CmdletBinding()]
 param(
@@ -10,7 +10,11 @@ param(
   [string]$AgentId = "agent-nako",
   [switch]$NonInteractive,
   [switch]$SkipSkills,
-  [switch]$SkipModels
+  [switch]$SkipModels,
+  [switch]$ResetSecrets,
+  [switch]$WithCcConnect,
+  [switch]$WithFeishu,
+  [switch]$WithWeixin
 )
 
 $ErrorActionPreference = "Stop"
@@ -75,6 +79,8 @@ $OpenclawConfig = Join-Path $OpenclawHome "openclaw.json"
 $OpenclawSkills = Join-Path $OpenclawHome "skills"
 $AgentWorkspace = Join-Path $OpenclawHome "workspace\$AgentId"
 $AgentDataDir = Join-Path $OpenclawHome "agents\$AgentId"
+
+if ($WithFeishu -or $WithWeixin) { $WithCcConnect = $true }
 
 Write-Host ""
 Write-Host "野木奈子 Agent Pack - 安装器 (Windows)" -ForegroundColor White -BackgroundColor DarkBlue
@@ -206,28 +212,93 @@ if ($SkipModels) {
 # ─── Collect secrets ────────────────────────────────────────────────────────
 Step "4. 收集凭据"
 Dim "留空回车即跳过，对应能力会被标记 '未启用'。"
+Dim "全跳过也行：装完后随时通过 `$AgentWorkspace\skills\.env 或 $OpenclawSkills\.env 补。"
 Write-Host ""
 
-$env:FEISHU_APP_ID = ""; $env:FEISHU_APP_SECRET = ""
-$env:MINIMAX_API_KEY = ""; $env:MINIMAX_GROUP_ID = ""
-$env:VOLCENGINE_API_KEY = ""; $env:VOLCENGINE_RESOURCE_ID = "seed-tts-1.0"
-$env:FAL_KEY = ""; $env:KIE_API_KEY = ""
-$env:SELFIE_REFERENCE_IMAGE = ""; $env:SELFIE_CHARACTER_DESC = ""
+function Set-EnvDefault($key, $value = "") {
+  if ([string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($key, "Process"))) {
+    [Environment]::SetEnvironmentVariable($key, $value, "Process")
+  }
+}
+
+function Import-EnvFileIfUnset($path) {
+  $reused = @()
+  if (-not (Test-Path $path)) { return $reused }
+  foreach ($line in (Get-Content $path)) {
+    if ($line -notmatch '^\s*([A-Z_]+)\s*=\s*(.*)$') { continue }
+    $key = $Matches[1]
+    $value = $Matches[2].Trim()
+    $value = $value.Trim('"').Trim("'")
+    if (-not $value) { continue }
+    if ([string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($key, "Process"))) {
+      [Environment]::SetEnvironmentVariable($key, $value, "Process")
+      $reused += $key
+    }
+  }
+  return $reused
+}
+
+$SharedEnv = Join-Path $OpenclawSkills ".env"
+$AgentEnv = Join-Path $AgentWorkspace "skills\.env"
+if (-not $ResetSecrets) {
+  $reused = @()
+  $reused += Import-EnvFileIfUnset $SharedEnv
+  $reused += Import-EnvFileIfUnset $AgentEnv
+  if ($reused.Count -gt 0) {
+    Info "复用旧凭据 ($($reused.Count) 项): $($reused -join ' ')"
+    Dim "  想重新输入跑 -ResetSecrets。"
+    Write-Host ""
+  }
+}
+
+Set-EnvDefault "FEISHU_APP_ID"
+Set-EnvDefault "FEISHU_APP_SECRET"
+Set-EnvDefault "MINIMAX_API_KEY"
+Set-EnvDefault "MINIMAX_GROUP_ID"
+Set-EnvDefault "VOLCENGINE_API_KEY"
+Set-EnvDefault "VOLCENGINE_RESOURCE_ID" "seed-tts-1.0"
+Set-EnvDefault "FAL_KEY"
+Set-EnvDefault "KIE_API_KEY"
+Set-EnvDefault "SELFIE_REFERENCE_IMAGE" "https://pulseact.lovappen.cn/test/act_ci_build/dlc-promotion/act-gengen/images/e.png"
+Set-EnvDefault "SELFIE_CHARACTER_DESC"
 
 if (-not $NonInteractive) {
-  $env:FEISHU_APP_ID = Ask "飞书 App ID"
-  if ($env:FEISHU_APP_ID) { $env:FEISHU_APP_SECRET = AskSecret "飞书 App Secret" }
-  $env:MINIMAX_API_KEY = AskSecret "MiniMax API Key (留空则禁用唱歌/TTS)"
-  if ($env:MINIMAX_API_KEY) { $env:MINIMAX_GROUP_ID = Ask "MiniMax Group ID" }
-  if (Confirm "配置火山引擎 TTS 作备选？") {
-    $env:VOLCENGINE_API_KEY = AskSecret "Volcengine API Key"
-    $env:VOLCENGINE_RESOURCE_ID = Ask "Volcengine Resource ID" "seed-tts-1.0"
+  Dim "  飞书凭据 → 跳过（cc-connect QR 扫码绑定走 -WithFeishu；原生 Feishu 高级用户可装完后手填 skills\.env）"
+  if (-not $env:MINIMAX_API_KEY) {
+    $env:MINIMAX_API_KEY = AskSecret "MiniMax API Key (留空则禁用唱歌/TTS)"
   }
-  if (Confirm "启用 selfie？") {
-    $env:FAL_KEY = AskSecret "fal.ai API Key (留空则 fallback kie.ai)"
-    if (-not $env:FAL_KEY) { $env:KIE_API_KEY = AskSecret "kie.ai API Key" }
-    $env:SELFIE_REFERENCE_IMAGE = Ask "角色参考图 URL"
-    $env:SELFIE_CHARACTER_DESC = Ask "角色文字描述" "野木奈子，19岁人类美少女，红瞳，金色及肩发，战斗女仆装"
+  if ($env:MINIMAX_API_KEY -and -not $env:MINIMAX_GROUP_ID) {
+    $env:MINIMAX_GROUP_ID = Ask "MiniMax Group ID"
+  }
+  if ($env:VOLCENGINE_API_KEY -or (Confirm "配置火山引擎 TTS 作备选？")) {
+    if (-not $env:VOLCENGINE_API_KEY) {
+      $env:VOLCENGINE_API_KEY = AskSecret "Volcengine API Key"
+    }
+    if (-not $env:VOLCENGINE_RESOURCE_ID) {
+      $env:VOLCENGINE_RESOURCE_ID = Ask "Volcengine Resource ID" "seed-tts-1.0"
+    }
+  } else {
+    $env:VOLCENGINE_API_KEY = ""
+    $env:VOLCENGINE_RESOURCE_ID = ""
+  }
+  if ($env:FAL_KEY -or $env:KIE_API_KEY -or (Confirm "启用 selfie？")) {
+    if (-not $env:FAL_KEY -and -not $env:KIE_API_KEY) {
+      $env:FAL_KEY = AskSecret "fal.ai API Key (推荐，留空则 fallback kie.ai)"
+    }
+    if (-not $env:FAL_KEY -and -not $env:KIE_API_KEY) {
+      $env:KIE_API_KEY = AskSecret "kie.ai API Key"
+    }
+    if (-not $env:SELFIE_REFERENCE_IMAGE) {
+      $env:SELFIE_REFERENCE_IMAGE = Ask "角色参考图 URL（保持相貌一致）" "https://pulseact.lovappen.cn/test/act_ci_build/dlc-promotion/act-gengen/images/e.png"
+    }
+    if (-not $env:SELFIE_CHARACTER_DESC) {
+      $env:SELFIE_CHARACTER_DESC = Ask "角色文字描述" "野木奈子，19岁人类美少女，红瞳，金色及肩发，战斗女仆装"
+    }
+  } else {
+    $env:FAL_KEY = ""
+    $env:KIE_API_KEY = ""
+    $env:SELFIE_REFERENCE_IMAGE = ""
+    $env:SELFIE_CHARACTER_DESC = ""
   }
 }
 
@@ -396,6 +467,32 @@ open(path, 'w', encoding='utf-8').write(json.dumps(cfg, indent=2, ensure_ascii=F
 print(f'merged: agent={agent_id}, primary={primary}')
 "@
 Info "openclaw.json 已合并"
+
+# ─── cc-connect 多平台 (可选) ──────────────────────────────────────────────
+if ($WithCcConnect -or ((-not $NonInteractive) -and (Confirm "现在配置 cc-connect 接入飞书/微信等多平台？"))) {
+  Step "8. cc-connect 多平台接入"
+  $CcFlags = @("--agent-id", $AgentId)
+  if ($NonInteractive) { $CcFlags += "--non-interactive" }
+  if ($WithFeishu) { $CcFlags += "--with-feishu" }
+  if ($WithWeixin) { $CcFlags += "--with-weixin" }
+
+  $RepoRoot = Split-Path -Parent $PackRoot
+  $CcSetup = Join-Path $RepoRoot "scripts\cc-connect-setup.sh"
+  if (-not (Test-Path $CcSetup)) {
+    $CcSetup = Join-Path $ScriptDir "cc-connect-setup.sh"
+  }
+
+  if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
+    Warn "未发现 bash，跳过 cc-connect 自动接入。可在 Git Bash / WSL 中运行 scripts/cc-connect-setup.sh。"
+  } elseif (-not (Test-Path $CcSetup)) {
+    Warn "未找到 cc-connect-setup.sh，跳过 cc-connect 自动接入。"
+  } else {
+    & bash $CcSetup @CcFlags
+    if ($LASTEXITCODE -ne 0) {
+      Warn "cc-connect 配置未完成（可后续手动跑 scripts/cc-connect-setup.sh）"
+    }
+  }
+}
 
 # ─── Done ───────────────────────────────────────────────────────────────────
 Write-Host ""
