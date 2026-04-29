@@ -74,7 +74,7 @@ Agent 会调 `openclaw` 的 model-switch API（如支持），或提示用户换
 
 ```bash
 git clone https://github.com/YOU/Agents.git
-bash Agents/nako/install.sh
+bash Agents/install.sh
 ```
 
 ## 调 Skill 行为
@@ -115,9 +115,9 @@ tail -f ~/.openclaw/skills/voice/logs/skill.jsonl | jq .
 ```bash
 cd /path/to/Agents
 git pull
-bash nako/install.sh    # 交互询问每个文件是否覆盖
+bash install.sh    # 交互询问每个文件是否覆盖
 # 或
-bash nako/install.sh --force  # 全部覆盖（仍备份）
+bash install.sh --force  # 全部覆盖（仍备份）
 ```
 
 你写的 `custom.md` / memory/ / sessions/ 永远不会被动。

@@ -7,16 +7,16 @@
 **macOS / Linux:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | bash
 ```
 
 **Windows (PowerShell 7+):**
 
 ```powershell
-iex (iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.ps1).Content
+iex (iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/install.ps1).Content
 
 # cc-connect 飞书 QR
-$installer = [scriptblock]::Create((iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/nako/install.ps1).Content)
+$installer = [scriptblock]::Create((iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/install.ps1).Content)
 & $installer -WithFeishu
 ```
 
@@ -24,9 +24,9 @@ $installer = [scriptblock]::Create((iwr -UseBasicParsing https://raw.githubuserc
 
 ```bash
 git clone https://github.com/Lovappen/Agents.git
-bash Agents/nako/install.sh
+bash Agents/install.sh
 # Windows:
-pwsh Agents\nako\install.ps1
+pwsh Agents\install.ps1
 ```
 
 ## 前置
@@ -75,7 +75,7 @@ pwsh Agents\nako\install.ps1
 - MiniMax music 目前**仅支持国内版账号**（`api.minimaxi.com`）。国际版支持后续补。
 - Whisper 首次运行下模型（tiny ~72MB / turbo ~1.5GB）。
 - Windows 原生未经充分测试，推荐 WSL2。
-- **微信渠道**（通过 [cc-connect](https://github.com/chenhg5/cc-connect)）：语音永远是文件附件而非原生气泡（iLink Bot API 限制）；视频要原生卡片需用 fork [`CodeEagle/cc-connect@lazycat/v1.3.3`](https://github.com/CodeEagle/cc-connect/tree/lazycat/v1.3.3) + `ffmpeg`/`libavcodec-extra`。详见 [docs/nako/troubleshooting.md](../docs/nako/troubleshooting.md#微信渠道cc-connect已知限制)。
+- **微信渠道**（通过 [cc-connect](https://github.com/chenhg5/cc-connect)）：语音永远是文件附件而非原生气泡（iLink Bot API 限制）；`--with-weixin` 会优先安装支持 mp4 原生视频的 [`CodeEagle/cc-connect@v1.3.3`](https://github.com/CodeEagle/cc-connect/releases/tag/v1.3.3) release。详见 [docs/nako/troubleshooting.md](../docs/nako/troubleshooting.md#微信渠道cc-connect已知限制)。
 
 ## License
 

@@ -175,7 +175,7 @@ env_merge() {
 
 # ───── Determine pack root from any script location ─────
 pack_root() {
-  # Called from nako/scripts/*.sh or nako/install.sh
+  # Called from nako/scripts/*.sh or the root install.sh
   local dir; dir="$(cd "$(dirname "${BASH_SOURCE[1]:-$0}")" && pwd)"
   # if under scripts/ → go up one; if under nako root → itself
   if [ "$(basename "$dir")" = "scripts" ]; then

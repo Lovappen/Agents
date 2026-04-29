@@ -15,6 +15,7 @@
 #   --display-name <n>   cc-connect 内显示名 (默认 OpenClaw <id>)
 #   --with-feishu        自动跑 feishu QR 引导（若未配 feishu）
 #   --with-weixin        自动跑 weixin QR 引导（若未配 weixin）
+#   --cc-connect-source  auto|npm|lazycat|skip (默认 auto；微信会优先 lazycat fork)
 #   --non-interactive    不询问，缺什么就跳过
 
 set -euo pipefail
@@ -54,13 +55,20 @@ confirm(){
 WITH_FEISHU=0
 WITH_WEIXIN=0
 NON_INTERACTIVE="${NON_INTERACTIVE:-0}"
+CC_CONNECT_SOURCE="${CC_CONNECT_SOURCE:-auto}"
+CC_CONNECT_LAZYCAT_REPO="${CC_CONNECT_LAZYCAT_REPO:-https://github.com/CodeEagle/cc-connect.git}"
+CC_CONNECT_LAZYCAT_VERSION="${CC_CONNECT_LAZYCAT_VERSION:-v1.3.3}"
+CC_CONNECT_LAZYCAT_REF="${CC_CONNECT_LAZYCAT_REF:-lazycat/v1.3.3}"
+CC_CONNECT_LAZYCAT_RELEASE_BASE="${CC_CONNECT_LAZYCAT_RELEASE_BASE:-https://github.com/CodeEagle/cc-connect/releases/download/$CC_CONNECT_LAZYCAT_VERSION}"
 AGENT_ID="agent-nako"
 DISPLAY_NAME=""
+CC_CONNECT_CHANGED=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --with-feishu) WITH_FEISHU=1; shift ;;
     --with-weixin) WITH_WEIXIN=1; shift ;;
+    --cc-connect-source) CC_CONNECT_SOURCE="$2"; shift 2 ;;
     --non-interactive) NON_INTERACTIVE=1; shift ;;
     --agent-id) AGENT_ID="$2"; shift 2 ;;
     --display-name) DISPLAY_NAME="$2"; shift 2 ;;
@@ -78,6 +86,7 @@ Flags:
   --display-name <n>   cc-connect 内显示名 (默认 "OpenClaw <id>")
   --with-feishu        自动跑 feishu QR 引导（若未配 feishu）
   --with-weixin        自动跑 weixin QR 引导（若未配 weixin）
+  --cc-connect-source  auto|npm|lazycat|skip (默认 auto；微信会优先 lazycat fork)
   --non-interactive    不询问，缺什么就跳过
   -h, --help           本帮助
 HELP
@@ -87,21 +96,197 @@ HELP
 done
 : ${DISPLAY_NAME:="OpenClaw $AGENT_ID"}
 
+case "$CC_CONNECT_SOURCE" in
+  auto|npm|lazycat|skip) ;;
+  *) err "--cc-connect-source 只支持 auto|npm|lazycat|skip"; exit 1 ;;
+esac
+
 CC_CONFIG="$HOME/.cc-connect/config.toml"
 WORKSPACE="$HOME/.openclaw/workspace/$AGENT_ID"
+
+find_go() {
+  local g
+  for g in go /usr/local/go/bin/go /usr/lib/go-1.25/bin/go /usr/lib/go-1.24/bin/go; do
+    if command -v "$g" >/dev/null 2>&1; then
+      command -v "$g"
+      return 0
+    fi
+  done
+  return 1
+}
+
+cc_connect_has_native_video() {
+  local bin
+  bin="$(command -v cc-connect 2>/dev/null || true)"
+  [ -n "$bin" ] || return 1
+  if cc-connect --version 2>&1 | grep -qE 'lazycat/v1\.3\.3|1\.3\.3-beta|1\.3\.[3-9]'; then
+    return 0
+  fi
+  if command -v strings >/dev/null 2>&1 && strings "$bin" 2>/dev/null | grep -qE 'SendFileVideo|uploadMediaVideo|buildVideoMessageItem'; then
+    return 0
+  fi
+  if grep -aE 'SendFileVideo|uploadMediaVideo|buildVideoMessageItem' "$bin" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+install_cc_connect_binary() {
+  local src="$1" dest="${CC_CONNECT_BIN:-}"
+  if [ -z "$dest" ]; then
+    if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
+      dest="/usr/local/bin/cc-connect"
+    elif [ -d /usr/local/bin ] && command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+      dest="/usr/local/bin/cc-connect"
+    else
+      mkdir -p "$HOME/.local/bin"
+      dest="$HOME/.local/bin/cc-connect"
+    fi
+  fi
+
+  mkdir -p "$(dirname "$dest")"
+  if [ -w "$(dirname "$dest")" ]; then
+    install -m 0755 "$src" "$dest"
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+    sudo install -m 0755 "$src" "$dest"
+  else
+    err "无法写入 $dest；请用 sudo 运行，或设置 CC_CONNECT_BIN=$HOME/.local/bin/cc-connect"
+    return 1
+  fi
+  hash -r 2>/dev/null || true
+  CC_CONNECT_CHANGED=1
+  info "cc-connect 已安装到 $dest"
+}
+
+cc_connect_asset_platform() {
+  local os arch
+  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) return 1 ;;
+  esac
+  case "$os" in
+    linux|darwin) printf '%s-%s\n' "$os" "$arch" ;;
+    *) return 1 ;;
+  esac
+}
+
+install_cc_connect_lazycat_release() {
+  local platform asset tmp archive checksum url checksum_url bin
+  if ! has_bin curl || ! has_bin tar; then
+    return 1
+  fi
+  platform="$(cc_connect_asset_platform)" || return 1
+  asset="cc-connect-${CC_CONNECT_LAZYCAT_VERSION}-${platform}.tar.gz"
+  url="${CC_CONNECT_LAZYCAT_RELEASE_BASE}/${asset}"
+  checksum_url="${url}.sha256"
+  tmp="$(mktemp -d)"
+
+  info "下载 cc-connect fork release: $asset"
+  archive="$tmp/$asset"
+  if ! curl -fL --retry 2 --connect-timeout 10 "$url" -o "$archive"; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  checksum="$tmp/$asset.sha256"
+  if curl -fsSL "$checksum_url" -o "$checksum"; then
+    expected="$(awk '{print $1}' "$checksum")"
+    if command -v sha256sum >/dev/null 2>&1; then
+      actual="$(sha256sum "$archive" | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+      actual="$(shasum -a 256 "$archive" | awk '{print $1}')"
+    else
+      actual="$expected"
+    fi
+    [ "$expected" = "$actual" ] || { rm -rf "$tmp"; return 1; }
+  fi
+  tar -C "$tmp" -xzf "$archive"
+  bin="$tmp/cc-connect-$platform"
+  if [ ! -x "$bin" ]; then
+    bin="$(find "$tmp" -type f -perm -111 -name 'cc-connect*' | head -1 || true)"
+  fi
+  [ -n "$bin" ] || { rm -rf "$tmp"; return 1; }
+  install_cc_connect_binary "$bin"
+  local rc=$?
+  rm -rf "$tmp"
+  return "$rc"
+}
+
+install_cc_connect_lazycat() {
+  local gobin tmp
+  if ! has_bin git; then
+    warn "缺少 git，无法安装 CodeEagle/cc-connect fork"
+    return 1
+  fi
+  if ! gobin="$(find_go)"; then
+    warn "缺少 Go，无法构建 CodeEagle/cc-connect fork；mp4 微信视频会降级为文件"
+    dim "  Debian/Ubuntu: sudo apt-get install golang-go"
+    dim "  macOS: brew install go"
+    return 1
+  fi
+
+  tmp="$(mktemp -d)"
+  info "安装支持微信原生视频的 cc-connect fork ($CC_CONNECT_LAZYCAT_REF) ..."
+  if ! git clone --depth 1 --branch "$CC_CONNECT_LAZYCAT_REF" "$CC_CONNECT_LAZYCAT_REPO" "$tmp" >/dev/null; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  if ! (
+    cd "$tmp"
+    build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    GOTOOLCHAIN="${GOTOOLCHAIN:-auto}" "$gobin" build -tags no_web \
+      -ldflags "-s -w -X main.version=$CC_CONNECT_LAZYCAT_REF -X main.commit=Lovappen-install -X main.buildTime=$build_time" \
+      -o "$tmp/cc-connect" ./cmd/cc-connect
+  ); then
+    rm -rf "$tmp"
+    return 1
+  fi
+  install_cc_connect_binary "$tmp/cc-connect"
+  local rc=$?
+  rm -rf "$tmp"
+  return "$rc"
+}
+
+install_cc_connect_npm() {
+  if ! has_bin npm; then
+    err "需要 npm 来装 cc-connect。先装 Node 22+ 再重跑（macOS: brew install node；Linux: see https://nodejs.org）"
+    return 1
+  fi
+  info "cc-connect 未装，npm i -g cc-connect ..."
+  npm i -g cc-connect 2>&1 | tail -3 || { err "cc-connect 安装失败"; return 1; }
+  CC_CONNECT_CHANGED=1
+}
+
+cc_connect_running_pids() {
+  pgrep -af "cc-connect" 2>/dev/null \
+    | awk '!/cc-connect-setup\.sh/ && !/cc-connect (feishu|weixin) setup/ {print $1}'
+}
 
 # ── 1. 装 cc-connect ──────────────────────────────────────────────────
 # 既然你跑了这个脚本，说明你想用 cc-connect — 默认直接装，不再问。
 step "1. 检查 cc-connect"
-if ! has_bin cc-connect; then
-  if ! has_bin npm; then
-    err "需要 npm 来装 cc-connect。先装 Node 22+ 再重跑（macOS: brew install node ；Linux: see https://nodejs.org）"
-    exit 1
+if [ "$CC_CONNECT_SOURCE" = "skip" ]; then
+  has_bin cc-connect || { err "--cc-connect-source skip 但系统里找不到 cc-connect"; exit 1; }
+elif [ "$CC_CONNECT_SOURCE" = "lazycat" ] || { [ "$CC_CONNECT_SOURCE" = "auto" ] && [ "$WITH_WEIXIN" = "1" ]; }; then
+  if cc_connect_has_native_video; then
+    info "当前 cc-connect 已支持微信原生视频"
+  elif ! install_cc_connect_lazycat_release && ! install_cc_connect_lazycat; then
+    if has_bin cc-connect; then
+      warn "继续使用现有 cc-connect；微信 mp4 可能会作为文件发送"
+    else
+      install_cc_connect_npm || exit 1
+    fi
   fi
-  info "cc-connect 未装，npm i -g cc-connect ..."
-  npm i -g cc-connect 2>&1 | tail -3 || { err "cc-connect 安装失败"; exit 1; }
+elif ! has_bin cc-connect; then
+  install_cc_connect_npm || exit 1
 fi
-info "cc-connect $(cc-connect --version 2>&1 | head -1 | awk '{print $2}')"
+info "cc-connect $(cc-connect --version 2>&1 | head -1)"
+if [ "$WITH_WEIXIN" = "1" ] && ! cc_connect_has_native_video; then
+  warn "当前 cc-connect 不支持微信原生视频分流，mp4 会按文件附件发送"
+  dim "  解决：安装 Go 后重跑，或设置 CC_CONNECT_SOURCE=lazycat"
+fi
 
 # ── 2. 初始化 / merge config.toml ─────────────────────────────────────
 step "2. 配置 cc-connect 项目: $AGENT_ID"
@@ -205,7 +390,19 @@ fi
 echo
 # ── 4. 启动 cc-connect (daemon 优先，fallback 后台 nohup) ────────────────
 step "4. 启动 cc-connect"
-if pgrep -f "cc-connect" >/dev/null 2>&1 && ! pgrep -f "cc-connect (feishu|weixin) setup" >/dev/null 2>&1; then
+if [ "$CC_CONNECT_CHANGED" = "1" ]; then
+  old_pids="$(cc_connect_running_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  if [ -n "${old_pids:-}" ]; then
+    warn "cc-connect 已更新，重启旧进程: $old_pids"
+    kill $old_pids 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+      [ -z "$(cc_connect_running_pids)" ] && break
+      sleep 1
+    done
+  fi
+fi
+
+if [ -n "$(cc_connect_running_pids)" ]; then
   info "cc-connect 已在跑，跳过"
 else
   if cc-connect daemon install --force >/dev/null 2>&1 && cc-connect daemon start >/dev/null 2>&1; then
