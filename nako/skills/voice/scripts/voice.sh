@@ -25,9 +25,102 @@ source "$SKILL_LOG_SH" 2>/dev/null || true
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 command -v jq &>/dev/null || { log_error "jq required"; exit 1; }
+
+_infer_ccconnect_project() {
+  local value base
+
+  for value in "${OPENCLAW_CCCONNECT_PROJECT:-}" "${OPENCLAW_AGENT_ID:-}" "${AGENT_ID:-}"; do
+    if [ -n "$value" ]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done
+
+  for value in "${OPENCLAW_AGENT_WORKSPACE:-}" "$PWD"; do
+    [ -n "$value" ] || continue
+    base="$(basename "$value")"
+    case "$base" in
+      agent-*) printf '%s\n' "$base"; return 0 ;;
+    esac
+  done
+
+  if [ -n "${OPENCLAW_SESSION_ID:-}" ]; then
+    case "$OPENCLAW_SESSION_ID" in
+      agent:*)
+        value="${OPENCLAW_SESSION_ID#agent:}"
+        printf '%s\n' "${value%%:*}"
+        return 0
+        ;;
+    esac
+  fi
+
+  return 1
+}
+
+_infer_ccconnect_session() {
+  local project="$1"
+  local data_dir="${CC_CONNECT_DATA_DIR:-$HOME/.cc-connect}"
+  local session_file=""
+
+  if [ -n "${OPENCLAW_CCCONNECT_SESSION:-}" ]; then
+    printf '%s\n' "$OPENCLAW_CCCONNECT_SESSION"
+    return 0
+  fi
+
+  [ -n "$project" ] || return 1
+  session_file="$(ls -t "$data_dir"/sessions/"$project"_*.json 2>/dev/null | head -1 || true)"
+  [ -n "$session_file" ] || return 1
+
+  jq -r '
+    (.active_session // {}) as $active
+    | (.sessions // {}) as $sessions
+    | $active
+    | to_entries
+    | map(. + {updated: ($sessions[.value].updated_at // $sessions[.value].created_at // "")})
+    | sort_by(.updated)
+    | last
+    | .key // empty
+  ' "$session_file" 2>/dev/null
+}
+
+_should_use_ccconnect_delivery() {
+  [ "${OPENCLAW_OUTPUT_MODE:-}" = "acp" ] && return 0
+  [ -n "${OPENCLAW_CCCONNECT_PROJECT:-}" ] && return 0
+
+  case "$CHANNEL" in
+    acp|cli|webchat|cc-connect) return 0 ;;
+  esac
+
+  return 1
+}
+
+_ccconnect_send_file() {
+  local file="$1"
+  local message="$2"
+  local action="$3"
+  local project session cc_output
+  local send_args
+
+  command -v cc-connect >/dev/null 2>&1 || return 1
+  project="$(_infer_ccconnect_project || true)"
+  session="$(_infer_ccconnect_session "$project" || true)"
+  send_args=(send --file "$file" -m "$message")
+  [ -n "$project" ] && send_args+=(-p "$project")
+  [ -n "$session" ] && send_args+=(--session "$session")
+
+  if cc_output="$(cc-connect "${send_args[@]}" 2>&1)"; then
+    skill_log_ok voice "$action" "path=$file" "project=${project:-unknown}"
+    return 0
+  fi
+
+  log_warn "cc-connect send failed: $(printf '%s' "$cc_output" | tr '\n' ' ' | cut -c1-180)"
+  skill_log_fail voice "$action" "path=$file" "project=${project:-unknown}"
+  return 1
+}
 
 TEXT="${1:-}"
 CHANNEL="${2:-}"
@@ -165,14 +258,9 @@ fi
 # ACP mode short-circuit: skill emits artifact path, host (cc-connect / openclaw)
 # fans out to whatever platform the session is bound to.
 # ============================
-if [ "${OPENCLAW_OUTPUT_MODE:-feishu}" = "acp" ]; then
+if _should_use_ccconnect_delivery; then
   skill_log_ok voice acp_emit "path=$MP3_FILE" "provider=$PROVIDER" "duration_ms=$DURATION"
-  # If cc-connect is the host, push the attachment via its CLI side-channel.
-  if command -v cc-connect >/dev/null 2>&1; then
-    cc-connect send --file "$MP3_FILE" ${OPENCLAW_CCCONNECT_PROJECT:+-p "$OPENCLAW_CCCONNECT_PROJECT"} -m "🎤" >/dev/null 2>&1 \
-      && skill_log_ok voice ccconnect_send "path=$MP3_FILE" \
-      || skill_log_fail voice ccconnect_send "path=$MP3_FILE"
-  fi
+  _ccconnect_send_file "$MP3_FILE" "🎤" ccconnect_send || true
   printf '{"type":"audio","path":"%s","duration_ms":%s,"provider":"%s"}\n' "$MP3_FILE" "${DURATION:-0}" "$PROVIDER"
   exit 0
 fi

@@ -67,6 +67,98 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 command -v jq &>/dev/null || { log_error "jq required"; exit 1; }
 
+_infer_ccconnect_project() {
+  local value base
+
+  for value in "${OPENCLAW_CCCONNECT_PROJECT:-}" "${OPENCLAW_AGENT_ID:-}" "${AGENT_ID:-}"; do
+    if [ -n "$value" ]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done
+
+  for value in "${OPENCLAW_AGENT_WORKSPACE:-}" "$PWD"; do
+    [ -n "$value" ] || continue
+    base="$(basename "$value")"
+    case "$base" in
+      agent-*) printf '%s\n' "$base"; return 0 ;;
+    esac
+  done
+
+  if [ -n "${OPENCLAW_SESSION_ID:-}" ]; then
+    case "$OPENCLAW_SESSION_ID" in
+      agent:*)
+        value="${OPENCLAW_SESSION_ID#agent:}"
+        printf '%s\n' "${value%%:*}"
+        return 0
+        ;;
+    esac
+  fi
+
+  return 1
+}
+
+_infer_ccconnect_session() {
+  local project="$1"
+  local data_dir="${CC_CONNECT_DATA_DIR:-$HOME/.cc-connect}"
+  local session_file=""
+
+  if [ -n "${OPENCLAW_CCCONNECT_SESSION:-}" ]; then
+    printf '%s\n' "$OPENCLAW_CCCONNECT_SESSION"
+    return 0
+  fi
+
+  [ -n "$project" ] || return 1
+  session_file="$(ls -t "$data_dir"/sessions/"$project"_*.json 2>/dev/null | head -1 || true)"
+  [ -n "$session_file" ] || return 1
+
+  jq -r '
+    (.active_session // {}) as $active
+    | (.sessions // {}) as $sessions
+    | $active
+    | to_entries
+    | map(. + {updated: ($sessions[.value].updated_at // $sessions[.value].created_at // "")})
+    | sort_by(.updated)
+    | last
+    | .key // empty
+  ' "$session_file" 2>/dev/null
+}
+
+_should_use_ccconnect_delivery() {
+  [ "${OPENCLAW_OUTPUT_MODE:-}" = "acp" ] && return 0
+  [ -n "${OPENCLAW_CCCONNECT_PROJECT:-}" ] && return 0
+
+  case "$CHANNEL" in
+    acp|cli|webchat|cc-connect) return 0 ;;
+  esac
+
+  return 1
+}
+
+_ccconnect_send_file() {
+  local file="$1"
+  local message="$2"
+  local action="$3"
+  local project session cc_output
+  local send_args
+
+  command -v cc-connect >/dev/null 2>&1 || return 1
+  project="$(_infer_ccconnect_project || true)"
+  session="$(_infer_ccconnect_session "$project" || true)"
+  send_args=(send --file "$file" -m "$message")
+  [ -n "$project" ] && send_args+=(-p "$project")
+  [ -n "$session" ] && send_args+=(--session "$session")
+
+  if cc_output="$(cc-connect "${send_args[@]}" 2>&1)"; then
+    skill_log_ok selfie "$action" "path=$file" "project=${project:-unknown}"
+    return 0
+  fi
+
+  log_warn "cc-connect send failed: $(printf '%s' "$cc_output" | tr '\n' ' ' | cut -c1-180)"
+  skill_log_fail selfie "$action" "path=$file" "project=${project:-unknown}"
+  return 1
+}
+
 IMAGE_URL="${1:-}"
 PROMPT="${2:-}"
 CHANNEL="${3:-}"
@@ -238,6 +330,34 @@ esac
 [ -z "$VIDEO_URL" ] && { log_error "No video URL after generation"; exit 1; }
 
 # ============================
+# cc-connect / ACP delivery
+# ============================
+if _should_use_ccconnect_delivery; then
+  OUTDIR="${OPENCLAW_HOME:-$HOME/.openclaw}/media/outbound"
+  mkdir -p "$OUTDIR"
+  VIDEO_FILE="${OUTDIR}/$(uuidgen | tr '[:upper:]' '[:lower:]').mp4"
+  if curl -s -o "$VIDEO_FILE" "$VIDEO_URL" && [ -s "$VIDEO_FILE" ]; then
+    skill_log_ok selfie acp_emit_video "path=$VIDEO_FILE" "provider=$PROVIDER"
+    _ccconnect_send_file "$VIDEO_FILE" "${CAPTION:-🎬}" ccconnect_send_video || true
+    printf '{"type":"video","path":"%s","url":"%s","provider":"%s"}\n' "$VIDEO_FILE" "$VIDEO_URL" "$PROVIDER"
+  else
+    rm -f "$VIDEO_FILE"
+    log_warn "Video download failed, emitting URL only"
+    skill_log_ok selfie acp_emit_video_url "url=$VIDEO_URL" "provider=$PROVIDER"
+    if command -v cc-connect >/dev/null 2>&1; then
+      project="$(_infer_ccconnect_project || true)"
+      session="$(_infer_ccconnect_session "$project" || true)"
+      send_args=(send -m "${CAPTION:+$CAPTION }$VIDEO_URL")
+      [ -n "$project" ] && send_args+=(-p "$project")
+      [ -n "$session" ] && send_args+=(--session "$session")
+      cc-connect "${send_args[@]}" >/dev/null 2>&1 || true
+    fi
+    printf '{"type":"video","url":"%s","provider":"%s"}\n' "$VIDEO_URL" "$PROVIDER"
+  fi
+  exit 0
+fi
+
+# ============================
 # Send via Feishu or OpenClaw gateway
 # ============================
 log_info "Sending video to $CHANNEL..."
@@ -256,7 +376,9 @@ if [ -n "${FEISHU_APP_ID:-}" ] && [ -n "${FEISHU_APP_SECRET:-}" ]; then
 
   if [ -n "$TENANT_TOKEN" ]; then
     # Download video to temp file
-    TMPFILE="/Users/openclaw/.openclaw/media/outbound/$(uuidgen | tr '[:upper:]' '[:lower:]').mp4"
+    OUTDIR="${OPENCLAW_HOME:-$HOME/.openclaw}/media/outbound"
+    mkdir -p "$OUTDIR"
+    TMPFILE="$OUTDIR/$(uuidgen | tr '[:upper:]' '[:lower:]').mp4"
     curl -s -o "$TMPFILE" "$VIDEO_URL"
 
     if [ -s "$TMPFILE" ]; then
