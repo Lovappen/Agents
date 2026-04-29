@@ -124,7 +124,7 @@ work_dir = "$HOME/.openclaw"
 command = "openclaw"
 args = ["acp", "--session", "agent:$AGENT_ID:main"]
 display_name = "$DISPLAY_NAME"
-env = { OPENCLAW_OUTPUT_MODE = "acp" }
+env = { OPENCLAW_OUTPUT_MODE = "acp", OPENCLAW_CCCONNECT_PROJECT = "$AGENT_ID" }
 EOF
   info "新建 $CC_CONFIG"
 else
@@ -144,7 +144,7 @@ work_dir = "$HOME/.openclaw"
 command = "openclaw"
 args = ["acp", "--session", "agent:$AGENT_ID:main"]
 display_name = "$DISPLAY_NAME"
-env = { OPENCLAW_OUTPUT_MODE = "acp" }
+env = { OPENCLAW_OUTPUT_MODE = "acp", OPENCLAW_CCCONNECT_PROJECT = "$AGENT_ID" }
 EOF
     info "追加 $AGENT_ID project 到 $CC_CONFIG"
   fi

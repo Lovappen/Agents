@@ -65,6 +65,102 @@ _detect_reference_image() {
   echo "${SELFIE_REFERENCE_IMAGE:-}"
 }
 
+_infer_ccconnect_project() {
+  local value base
+
+  for value in "${OPENCLAW_CCCONNECT_PROJECT:-}" "${OPENCLAW_AGENT_ID:-}" "${AGENT_ID:-}"; do
+    if [ -n "$value" ]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done
+
+  for value in "${OPENCLAW_AGENT_WORKSPACE:-}" "$PWD"; do
+    [ -n "$value" ] || continue
+    base="$(basename "$value")"
+    case "$base" in
+      agent-*) printf '%s\n' "$base"; return 0 ;;
+    esac
+  done
+
+  if [ -n "${OPENCLAW_SESSION_ID:-}" ]; then
+    case "$OPENCLAW_SESSION_ID" in
+      agent:*)
+        value="${OPENCLAW_SESSION_ID#agent:}"
+        printf '%s\n' "${value%%:*}"
+        return 0
+        ;;
+    esac
+  fi
+
+  return 1
+}
+
+_infer_ccconnect_session() {
+  local project="$1"
+  local data_dir="${CC_CONNECT_DATA_DIR:-$HOME/.cc-connect}"
+  local session_file=""
+
+  if [ -n "${OPENCLAW_CCCONNECT_SESSION:-}" ]; then
+    printf '%s\n' "$OPENCLAW_CCCONNECT_SESSION"
+    return 0
+  fi
+
+  [ -n "$project" ] || return 1
+  session_file="$(ls -t "$data_dir"/sessions/"$project"_*.json 2>/dev/null | head -1 || true)"
+  [ -n "$session_file" ] || return 1
+
+  jq -r '
+    (.active_session // {}) as $active
+    | (.sessions // {}) as $sessions
+    | $active
+    | to_entries
+    | map(. + {updated: ($sessions[.value].updated_at // $sessions[.value].created_at // "")})
+    | sort_by(.updated)
+    | last
+    | .key // empty
+  ' "$session_file" 2>/dev/null
+}
+
+_should_use_ccconnect_delivery() {
+  [ "${OPENCLAW_OUTPUT_MODE:-}" = "acp" ] && return 0
+  [ -n "${OPENCLAW_CCCONNECT_PROJECT:-}" ] && return 0
+
+  case "$CHANNEL" in
+    acp|cli|webchat|cc-connect) return 0 ;;
+  esac
+
+  return 1
+}
+
+_emit_or_send_acp_image() {
+  local temp_file project session cc_output
+  local send_args
+
+  temp_file="/tmp/selfie_$(date +%s).${OUTPUT_FORMAT:-png}"
+  if curl -s -o "$temp_file" "$IMAGE_URL" && [ -s "$temp_file" ]; then
+    skill_log_ok selfie acp_emit "path=$temp_file" "provider=$PROVIDER"
+    if command -v cc-connect >/dev/null 2>&1; then
+      project="$(_infer_ccconnect_project || true)"
+      session="$(_infer_ccconnect_session "$project" || true)"
+      send_args=(send --image "$temp_file" -m "$CAPTION")
+      [ -n "$project" ] && send_args+=(-p "$project")
+      [ -n "$session" ] && send_args+=(--session "$session")
+
+      if cc_output="$(cc-connect "${send_args[@]}" 2>&1)"; then
+        skill_log_ok selfie ccconnect_send "path=$temp_file" "project=${project:-unknown}"
+      else
+        log_warn "cc-connect image send failed: $(printf '%s' "$cc_output" | tr '\n' ' ' | cut -c1-180)"
+        skill_log_fail selfie ccconnect_send "path=$temp_file" "project=${project:-unknown}"
+      fi
+    fi
+    printf '{"type":"image","path":"%s","url":"%s","provider":"%s"}\n' "$temp_file" "$IMAGE_URL" "$PROVIDER"
+  else
+    skill_log_ok selfie acp_emit_url "url=$IMAGE_URL" "provider=$PROVIDER"
+    printf '{"type":"image","url":"%s","provider":"%s"}\n' "$IMAGE_URL" "$PROVIDER"
+  fi
+}
+
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -315,20 +411,8 @@ log_info "Image ready: $IMAGE_URL"
 # ──────────────────────────────────────────────
 # ACP mode short-circuit: emit artifact path; host fans out per-platform.
 # ──────────────────────────────────────────────
-if [ "${OPENCLAW_OUTPUT_MODE:-feishu}" = "acp" ]; then
-  TEMP_FILE="/tmp/selfie_$(date +%s).${OUTPUT_FORMAT:-png}"
-  if curl -s -o "$TEMP_FILE" "$IMAGE_URL" && [ -s "$TEMP_FILE" ]; then
-    skill_log_ok selfie acp_emit "path=$TEMP_FILE" "provider=$PROVIDER"
-    if command -v cc-connect >/dev/null 2>&1; then
-      cc-connect send --image "$TEMP_FILE" ${OPENCLAW_CCCONNECT_PROJECT:+-p "$OPENCLAW_CCCONNECT_PROJECT"} -m "📸" >/dev/null 2>&1 \
-        && skill_log_ok selfie ccconnect_send "path=$TEMP_FILE" \
-        || skill_log_fail selfie ccconnect_send "path=$TEMP_FILE"
-    fi
-    printf '{"type":"image","path":"%s","url":"%s","provider":"%s"}\n' "$TEMP_FILE" "$IMAGE_URL" "$PROVIDER"
-  else
-    skill_log_ok selfie acp_emit_url "url=$IMAGE_URL" "provider=$PROVIDER"
-    printf '{"type":"image","url":"%s","provider":"%s"}\n' "$IMAGE_URL" "$PROVIDER"
-  fi
+if _should_use_ccconnect_delivery; then
+  _emit_or_send_acp_image
   exit 0
 fi
 
