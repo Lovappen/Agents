@@ -46,6 +46,7 @@ QR_PLATFORMS = ("feishu", "weixin")
 OPENCLAW_GATEWAY_PORT = int(os.environ.get("OPENCLAW_GATEWAY_PORT", "18789"))
 OPENCLAW_GATEWAY_HEAP_MB = os.environ.get("OPENCLAW_GATEWAY_HEAP_MB", "2048")
 OPENCLAW_WATCHDOG_INTERVAL = int(os.environ.get("NAKO_GATEWAY_WATCHDOG_INTERVAL", "10"))
+NPM_RENAME_TMP_RE = re.compile(r"^\.[^/]+-[A-Za-z0-9]{6,}$")
 TRUSTED_PROXY_CIDRS = tuple(
     ipaddress.ip_network(c.strip())
     for c in os.environ.get("NAKO_TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128,172.16.0.0/12").split(",")
@@ -348,6 +349,17 @@ def agent_install_command(aid: str) -> str:
     )
 
 
+def is_cc_connect_main_args(args: str) -> bool:
+    return re.fullmatch(r"(?:node\s+)?(?:\S*/)?cc-connect(?:\s+--force)?", args.strip()) is not None
+
+
+def is_openclaw_gateway_args(args: str) -> bool:
+    return (
+        "openclaw-gateway" in args
+        or re.search(r"(^|\s)(?:node\s+)?\S*/?openclaw(?:\.mjs)?\s+gateway\s+run(\s|$)", args) is not None
+    )
+
+
 def cc_connect_main_pids() -> list:
     try:
         out = subprocess.run(["ps", "-eo", "pid=,args="], stdout=subprocess.PIPE,
@@ -356,7 +368,6 @@ def cc_connect_main_pids() -> list:
         return []
 
     pids = []
-    main_re = re.compile(r"(?:^|\s)(?:node\s+)?\S*/cc-connect(?:\s+--force)?\s*$")
     for line in out.splitlines():
         line = line.strip()
         if not line:
@@ -368,7 +379,7 @@ def cc_connect_main_pids() -> list:
             continue
         if "cc-connect" not in args:
             continue
-        if main_re.search(args):
+        if is_cc_connect_main_args(args):
             pids.append(pid)
     return pids
 
@@ -418,12 +429,11 @@ def openclaw_client_pids() -> list:
             continue
         if "openclaw" not in args:
             continue
-        if "openclaw-gateway" in args or re.search(r"(^|\s)openclaw\s+gateway\s+run(\s|$)", args):
+        if is_openclaw_gateway_args(args):
             continue
         is_client = (
             re.search(r"(^|\s)openclaw-acp(\s|$)", args)
-            or re.search(r"(^|\s)(?:node\s+)?\S*/?openclaw\s+acp(\s|$)", args)
-            or re.fullmatch(r"(?:node\s+)?\S*/?openclaw", args)
+            or re.search(r"(^|\s)(?:node\s+)?\S*/?openclaw(?:\.mjs)?\s+acp(\s|$)", args)
         )
         if is_client:
             pids.append(pid)
@@ -455,6 +465,123 @@ def stop_openclaw_clients() -> list:
         except PermissionError:
             pass
     return pids
+
+
+def openclaw_gateway_pids() -> list:
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,args="], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True, check=False).stdout
+    except Exception:
+        return []
+
+    pids = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        pid_s, _, args = line.partition(" ")
+        try:
+            pid = int(pid_s)
+        except ValueError:
+            continue
+        if "openclaw" not in args:
+            continue
+        if is_openclaw_gateway_args(args):
+            pids.append(pid)
+    return pids
+
+
+def cleanup_openclaw_npm_rename_temps() -> list:
+    base = HOME / ".openclaw/plugin-runtime-deps"
+    if not base.exists():
+        return []
+
+    removed = []
+    for node_modules in base.glob("openclaw-*/node_modules"):
+        targets = [node_modules]
+        bin_dir = node_modules / ".bin"
+        if bin_dir.is_dir():
+            targets.append(bin_dir)
+        try:
+            scope_dirs = [
+                child for child in node_modules.iterdir()
+                if child.name.startswith("@") and child.is_dir() and not child.is_symlink()
+            ]
+            targets.extend(scope_dirs)
+        except Exception:
+            pass
+
+        for directory in targets:
+            try:
+                children = list(directory.iterdir())
+            except Exception:
+                continue
+
+            for child in children:
+                name = child.name
+                if name in {".bin", ".cache", ".package-lock.json"}:
+                    continue
+                if not NPM_RENAME_TMP_RE.match(name):
+                    continue
+                try:
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+                    removed.append(str(child))
+                except Exception:
+                    pass
+    return removed
+
+
+def prewarm_openclaw_runtime_deps(env: dict) -> list:
+    base = HOME / ".openclaw/plugin-runtime-deps"
+    npm = shutil.which("npm", path=env.get("PATH"))
+    if not npm or not base.exists():
+        return []
+
+    manifests = sorted(base.glob("openclaw-*/package.json"))
+    if not manifests:
+        return []
+
+    lock_path = base / ".nako-runtime-deps.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    results = []
+    with lock_path.open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        for manifest in manifests:
+            root = manifest.parent
+            cleanup_openclaw_npm_rename_temps()
+            npm_env = env.copy()
+            npm_env.update({
+                "npm_config_cache": str(root / ".openclaw-npm-cache"),
+                "npm_config_dry_run": "false",
+                "npm_config_fund": "false",
+                "npm_config_global": "false",
+                "npm_config_location": "project",
+                "npm_config_package_lock": "false",
+                "npm_config_save": "false",
+            })
+            try:
+                res = subprocess.run(
+                    [npm, "install", "--package-lock=false", "--save=false", "--no-audit", "--fund=false"],
+                    cwd=root,
+                    env=npm_env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=180,
+                    check=False,
+                )
+                if res.returncode == 0:
+                    results.append(f"{root.name}:ok")
+                else:
+                    tail = " ".join((res.stdout or "").splitlines()[-3:])
+                    results.append(f"{root.name}:rc={res.returncode} {tail[:240]}")
+            except Exception as exc:
+                results.append(f"{root.name}:error={str(exc)[:240]}")
+            cleanup_openclaw_npm_rename_temps()
+    return results
 
 
 def prune_empty_cc_projects() -> list:
@@ -524,13 +651,32 @@ def repair_nako_cc_projects() -> list:
             continue
 
         original = part
-        if "[projects.agent.options]" not in part:
+        if "[projects.agent]" not in part:
             insert = '\n[projects.agent]\ntype = "acp"\n\n[projects.agent.options]\n'
             marker = "\n[[projects.platforms]]"
             if marker in part:
                 part = part.replace(marker, insert + marker, 1)
             else:
                 part = part.rstrip() + insert
+        elif "[projects.agent.options]" not in part:
+            insert = '\n[projects.agent.options]\n'
+            marker = "\n[[projects.platforms]]"
+            if marker in part:
+                part = part.replace(marker, insert + marker, 1)
+            else:
+                part = part.rstrip() + insert
+
+        agent_match = re.search(
+            r"(?ms)(^\[projects\.agent\]\s*\n)(.*?)(?=^\[)",
+            part,
+        )
+        if agent_match:
+            agent_body = agent_match.group(2)
+            if re.search(r'(?m)^type\s*=', agent_body):
+                agent_body = re.sub(r'(?m)^type\s*=.*$', 'type = "acp"', agent_body)
+            else:
+                agent_body = 'type = "acp"\n' + agent_body
+            part = part[:agent_match.start(2)] + agent_body + part[agent_match.end(2):]
 
         opt = part.index("[projects.agent.options]")
         rest_start = opt + len("[projects.agent.options]")
@@ -538,13 +684,20 @@ def repair_nako_cc_projects() -> list:
         insert_at = len(part) if next_table is None else rest_start + next_table.start()
         section = part[opt:insert_at]
         needed = {
+            "work_dir": f'work_dir = "{HOME / ".openclaw"}"',
             "command": 'command = "openclaw"',
             "args": f'args = ["acp", "--session", "agent:{name}:main"]',
             "display_name": f'display_name = "OpenClaw {name}"',
             "env": f'env = {{ OPENCLAW_OUTPUT_MODE = "acp", OPENCLAW_CCCONNECT_PROJECT = "{name}" }}',
         }
-        additions = [line for key, line in needed.items()
-                     if not re.search(rf"(?m)^{key}\s*=", section)]
+        additions = []
+        for key, line in needed.items():
+            if re.search(rf"(?m)^{key}\s*=", section):
+                section = re.sub(rf"(?m)^{key}\s*=.*$", line, section)
+            else:
+                additions.append(line)
+        part = part[:opt] + section + part[insert_at:]
+        insert_at = opt + len(section)
         if additions:
             part = part[:insert_at].rstrip() + "\n" + "\n".join(additions) + "\n" + part[insert_at:]
 
@@ -599,16 +752,50 @@ def ensure_openclaw_gateway(env: dict) -> bool:
             return False
         gw_log = Path("/tmp/openclaw/openclaw-gateway.log")
         gw_log.parent.mkdir(parents=True, exist_ok=True)
-        with gw_log.open("ab") as f:
-            subprocess.Popen(["openclaw", "gateway", "run", "--port", str(port), "--bind", "loopback"],
-                             stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                             env=gw_env, start_new_session=True)
 
-        deadline = time.time() + 45
-        while time.time() < deadline:
+        existing = openclaw_gateway_pids()
+        if existing:
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                if tcp_port_open("127.0.0.1", port):
+                    return True
+                if not openclaw_gateway_pids():
+                    break
+                time.sleep(1)
+            if openclaw_gateway_pids():
+                return False
+
+        for attempt in range(2):
+            removed = cleanup_openclaw_npm_rename_temps()
+            prewarm = prewarm_openclaw_runtime_deps(gw_env)
+            with gw_log.open("ab") as f:
+                if removed:
+                    note = (
+                        f"\n=== nako cleaned npm rename temps before gateway start "
+                        f"attempt={attempt + 1}: {len(removed)} entries ===\n"
+                    )
+                    f.write(note.encode("utf-8"))
+                if prewarm:
+                    note = f"\n=== nako prewarmed runtime deps attempt={attempt + 1}: {'; '.join(prewarm)} ===\n"
+                    f.write(note.encode("utf-8"))
+                proc = subprocess.Popen(["openclaw", "gateway", "run", "--port", str(port), "--bind", "loopback"],
+                                        stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                        env=gw_env, start_new_session=True)
+
+            deadline = time.time() + 45
+            while time.time() < deadline:
+                if tcp_port_open("127.0.0.1", port):
+                    return True
+                if proc.poll() is not None:
+                    break
+                time.sleep(1)
+
             if tcp_port_open("127.0.0.1", port):
                 return True
-            time.sleep(1)
+            if proc.poll() is None:
+                return False
+            if attempt == 0:
+                time.sleep(1)
     return False
 
 
@@ -621,6 +808,8 @@ def gateway_watchdog():
         ok = ensure_openclaw_gateway(tool_env())
         if ok and not was_up:
             schedule_cc_connect_restart(tool_env(), reason="gateway-watchdog", delay=35.0)
+        elif ok and has_cc_projects() and not cc_connect_main_pids():
+            schedule_cc_connect_restart(tool_env(), reason="cc-connect-watchdog", delay=2.0)
         time.sleep(OPENCLAW_WATCHDOG_INTERVAL)
 
 
@@ -668,6 +857,16 @@ def schedule_reload_for_bound_platforms(n: int, bound: set, env: dict, reason: s
     write_state(n, cc_reload_platforms=sorted(desired))
     schedule_cc_connect_restart(env, reason=reason)
     return True
+
+
+def has_cc_projects() -> bool:
+    if not CC_CONFIG.exists():
+        return False
+    try:
+        text = CC_CONFIG.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    return re.search(r"(?m)^\[\[projects\]\]\s*$", text) is not None
 
 
 def existing_job_for_ip(client_ip: str, index: dict):
