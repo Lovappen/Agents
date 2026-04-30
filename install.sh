@@ -13,7 +13,7 @@
 #   --non-interactive   : no prompts; expects env vars set already; picks defaults
 #   --skip-skills       : skip skill install (persona only)
 #   --skip-models       : skip model mapping (keep existing primary)
-#   --cc-connect-source : auto|npm|lazycat|skip (default auto; Weixin prefers lazycat)
+#   --cc-connect-source : auto|npm|lazycat|skip (default lazycat; CodeEagle fork)
 
 set -euo pipefail
 
@@ -60,7 +60,7 @@ RESET_SECRETS=0
 WITH_CC_CONNECT=0
 WITH_FEISHU=0
 WITH_WEIXIN=0
-CC_CONNECT_SOURCE="${CC_CONNECT_SOURCE:-auto}"
+CC_CONNECT_SOURCE="${CC_CONNECT_SOURCE:-lazycat}"
 
 while [ $# -gt 0 ]; do
   case "$1" in

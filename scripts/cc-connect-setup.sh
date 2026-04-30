@@ -15,7 +15,7 @@
 #   --display-name <n>   cc-connect 内显示名 (默认 OpenClaw <id>)
 #   --with-feishu        自动跑 feishu QR 引导（若未配 feishu）
 #   --with-weixin        自动跑 weixin QR 引导（若未配 weixin）
-#   --cc-connect-source  auto|npm|lazycat|skip (默认 auto；微信会优先 lazycat fork)
+#   --cc-connect-source  auto|npm|lazycat|skip (默认 lazycat；CodeEagle fork)
 #   --non-interactive    不询问，缺什么就跳过
 
 set -euo pipefail
@@ -55,14 +55,17 @@ confirm(){
 WITH_FEISHU=0
 WITH_WEIXIN=0
 NON_INTERACTIVE="${NON_INTERACTIVE:-0}"
-CC_CONNECT_SOURCE="${CC_CONNECT_SOURCE:-auto}"
+CC_CONNECT_SOURCE="${CC_CONNECT_SOURCE:-lazycat}"
 CC_CONNECT_LAZYCAT_REPO="${CC_CONNECT_LAZYCAT_REPO:-https://github.com/CodeEagle/cc-connect.git}"
 CC_CONNECT_LAZYCAT_VERSION="${CC_CONNECT_LAZYCAT_VERSION:-v1.3.3}"
 CC_CONNECT_LAZYCAT_REF="${CC_CONNECT_LAZYCAT_REF:-lazycat/v1.3.3}"
 CC_CONNECT_LAZYCAT_RELEASE_BASE="${CC_CONNECT_LAZYCAT_RELEASE_BASE:-https://github.com/CodeEagle/cc-connect/releases/download/$CC_CONNECT_LAZYCAT_VERSION}"
+CC_CONNECT_GO_MIN_VERSION="${CC_CONNECT_GO_MIN_VERSION:-1.25.0}"
+CC_CONNECT_GO_DOWNLOAD_VERSION="${CC_CONNECT_GO_DOWNLOAD_VERSION:-1.25.0}"
 AGENT_ID="agent-nako"
 DISPLAY_NAME=""
 CC_CONNECT_CHANGED=0
+GO_FOR_CC_CONNECT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -86,7 +89,7 @@ Flags:
   --display-name <n>   cc-connect 内显示名 (默认 "OpenClaw <id>")
   --with-feishu        自动跑 feishu QR 引导（若未配 feishu）
   --with-weixin        自动跑 weixin QR 引导（若未配 weixin）
-  --cc-connect-source  auto|npm|lazycat|skip (默认 auto；微信会优先 lazycat fork)
+  --cc-connect-source  auto|npm|lazycat|skip (默认 lazycat；CodeEagle fork)
   --non-interactive    不询问，缺什么就跳过
   -h, --help           本帮助
 HELP
@@ -106,13 +109,134 @@ WORKSPACE="$HOME/.openclaw/workspace/$AGENT_ID"
 
 find_go() {
   local g
-  for g in go /usr/local/go/bin/go /usr/lib/go-1.25/bin/go /usr/lib/go-1.24/bin/go; do
+  for g in /usr/local/go/bin/go /usr/lib/go-1.25/bin/go /usr/lib/go-1.24/bin/go go; do
     if command -v "$g" >/dev/null 2>&1; then
       command -v "$g"
       return 0
     fi
   done
   return 1
+}
+
+go_version_value() {
+  "$1" version 2>/dev/null | awk '{print $3}' | sed 's/^go//'
+}
+
+version_ge() {
+  python3 - "$1" "$2" <<'PY'
+import sys
+
+def parts(value):
+    out = []
+    for item in value.split("."):
+        digits = ""
+        for char in item:
+            if char.isdigit():
+                digits += char
+            else:
+                break
+        out.append(int(digits or 0))
+    return out
+
+got = parts(sys.argv[1])
+need = parts(sys.argv[2])
+size = max(len(got), len(need))
+got += [0] * (size - len(got))
+need += [0] * (size - len(need))
+sys.exit(0 if got >= need else 1)
+PY
+}
+
+go_meets_min() {
+  local g="$1" v
+  v="$(go_version_value "$g")"
+  [ -n "$v" ] && version_ge "$v" "$CC_CONNECT_GO_MIN_VERSION"
+}
+
+find_go_for_lazycat() {
+  local g
+  for g in /usr/local/go/bin/go /usr/lib/go-1.25/bin/go go; do
+    if command -v "$g" >/dev/null 2>&1; then
+      g="$(command -v "$g")"
+      if go_meets_min "$g"; then
+        printf '%s\n' "$g"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+install_go_linux_tarball() {
+  local arch url tmp archive install_root gobin
+  has_bin curl || { warn "缺少 curl，无法下载 Go $CC_CONNECT_GO_DOWNLOAD_VERSION"; return 1; }
+  has_bin tar || { warn "缺少 tar，无法安装 Go $CC_CONNECT_GO_DOWNLOAD_VERSION"; return 1; }
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) warn "不支持自动安装 Go 的架构: $arch"; return 1 ;;
+  esac
+
+  url="https://dl.google.com/go/go${CC_CONNECT_GO_DOWNLOAD_VERSION}.linux-${arch}.tar.gz"
+  tmp="$(mktemp -d)"
+  archive="$tmp/go.tgz"
+  info "下载 Go ${CC_CONNECT_GO_DOWNLOAD_VERSION} (${arch}) ..."
+  if ! curl -fL --retry 3 --connect-timeout 20 "$url" -o "$archive"; then
+    rm -rf "$tmp"
+    return 1
+  fi
+
+  if [ "$(id -u)" -eq 0 ]; then
+    rm -rf /usr/local/go
+    tar -C /usr/local -xzf "$archive"
+    gobin="/usr/local/go/bin/go"
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+    sudo rm -rf /usr/local/go
+    sudo tar -C /usr/local -xzf "$archive"
+    gobin="/usr/local/go/bin/go"
+  else
+    install_root="$HOME/.local/go-${CC_CONNECT_GO_DOWNLOAD_VERSION}"
+    rm -rf "$install_root"
+    mkdir -p "$(dirname "$install_root")"
+    tar -C "$(dirname "$install_root")" -xzf "$archive"
+    mv "$(dirname "$install_root")/go" "$install_root"
+    gobin="$install_root/bin/go"
+  fi
+  rm -rf "$tmp"
+
+  if go_meets_min "$gobin"; then
+    GO_FOR_CC_CONNECT="$gobin"
+    info "Go $("$gobin" version | awk '{print $3}') 已就绪"
+    return 0
+  fi
+  return 1
+}
+
+ensure_go_for_lazycat() {
+  local g os
+  if g="$(find_go_for_lazycat)"; then
+    GO_FOR_CC_CONNECT="$g"
+    return 0
+  fi
+
+  os="$(uname -s)"
+  case "$os" in
+    Linux)
+      install_go_linux_tarball || return 1
+      ;;
+    Darwin)
+      if has_bin brew; then
+        info "安装 Go（CodeEagle/cc-connect 构建需要 >= $CC_CONNECT_GO_MIN_VERSION）..."
+        brew install go || true
+      fi
+      g="$(find_go_for_lazycat)" || return 1
+      GO_FOR_CC_CONNECT="$g"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 cc_connect_has_native_video() {
@@ -220,12 +344,13 @@ install_cc_connect_lazycat() {
     warn "缺少 git，无法安装 CodeEagle/cc-connect fork"
     return 1
   fi
-  if ! gobin="$(find_go)"; then
-    warn "缺少 Go，无法构建 CodeEagle/cc-connect fork；mp4 微信视频会降级为文件"
-    dim "  Debian/Ubuntu: sudo apt-get install golang-go"
+  if ! ensure_go_for_lazycat; then
+    warn "缺少 Go >= $CC_CONNECT_GO_MIN_VERSION，无法构建 CodeEagle/cc-connect fork"
+    dim "  Linux 会尝试从 dl.google.com 自动安装 Go；失败时请手动安装后重跑"
     dim "  macOS: brew install go"
     return 1
   fi
+  gobin="$GO_FOR_CC_CONNECT"
 
   tmp="$(mktemp -d)"
   info "安装支持微信原生视频的 cc-connect fork ($CC_CONNECT_LAZYCAT_REF) ..."
@@ -236,7 +361,7 @@ install_cc_connect_lazycat() {
   if ! (
     cd "$tmp"
     build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    GOTOOLCHAIN="${GOTOOLCHAIN:-auto}" "$gobin" build -tags no_web \
+    GOTOOLCHAIN="${GOTOOLCHAIN:-local}" "$gobin" build -tags no_web \
       -ldflags "-s -w -X main.version=$CC_CONNECT_LAZYCAT_REF -X main.commit=Lovappen-install -X main.buildTime=$build_time" \
       -o "$tmp/cc-connect" ./cmd/cc-connect
   ); then
@@ -269,23 +394,25 @@ cc_connect_running_pids() {
 step "1. 检查 cc-connect"
 if [ "$CC_CONNECT_SOURCE" = "skip" ]; then
   has_bin cc-connect || { err "--cc-connect-source skip 但系统里找不到 cc-connect"; exit 1; }
-elif [ "$CC_CONNECT_SOURCE" = "lazycat" ] || { [ "$CC_CONNECT_SOURCE" = "auto" ] && [ "$WITH_WEIXIN" = "1" ]; }; then
+elif [ "$CC_CONNECT_SOURCE" = "lazycat" ] || [ "$CC_CONNECT_SOURCE" = "auto" ]; then
   if cc_connect_has_native_video; then
     info "当前 cc-connect 已支持微信原生视频"
   elif ! install_cc_connect_lazycat_release && ! install_cc_connect_lazycat; then
-    if has_bin cc-connect; then
-      warn "继续使用现有 cc-connect；微信 mp4 可能会作为文件发送"
-    else
+    if [ "${CC_CONNECT_ALLOW_NPM_FALLBACK:-0}" = "1" ]; then
+      warn "CodeEagle/cc-connect 安装失败，按 CC_CONNECT_ALLOW_NPM_FALLBACK=1 回退 npm"
       install_cc_connect_npm || exit 1
+    else
+      err "CodeEagle/cc-connect 安装失败；请修复网络/Go 环境后重跑，或显式设置 --cc-connect-source npm"
+      exit 1
     fi
   fi
 elif ! has_bin cc-connect; then
   install_cc_connect_npm || exit 1
 fi
 info "cc-connect $(cc-connect --version 2>&1 | head -1)"
-if [ "$WITH_WEIXIN" = "1" ] && ! cc_connect_has_native_video; then
+if ! cc_connect_has_native_video; then
   warn "当前 cc-connect 不支持微信原生视频分流，mp4 会按文件附件发送"
-  dim "  解决：安装 Go 后重跑，或设置 CC_CONNECT_SOURCE=lazycat"
+  dim "  解决：修复 CodeEagle/cc-connect 安装，或显式使用 --cc-connect-source lazycat 重跑"
 fi
 
 # ── 2. 初始化 / merge config.toml ─────────────────────────────────────

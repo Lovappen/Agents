@@ -17,7 +17,7 @@ param(
   [switch]$WithFeishu,
   [switch]$WithWeixin,
   [ValidateSet("auto","npm","lazycat","skip")]
-  [string]$CcConnectSource = "auto"
+  [string]$CcConnectSource = "lazycat"
 )
 
 $ErrorActionPreference = "Stop"
