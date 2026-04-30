@@ -13,7 +13,7 @@ Deps: only Python 3 stdlib + the host's openclaw/cc-connect/curl/bash.
 
 Listen: 0.0.0.0:8088 (override with NAKO_SERVER_PORT env).
 """
-import http.server, socketserver, json, os, re, socket, subprocess, threading, time, urllib.parse, fcntl, ipaddress, shutil
+import http.server, socketserver, json, os, re, socket, subprocess, threading, time, urllib.parse, fcntl, ipaddress, shutil, shlex
 from pathlib import Path
 try:
     import tomllib
@@ -23,7 +23,20 @@ except ImportError:
 PORT       = int(os.environ.get("NAKO_SERVER_PORT", 8088))
 HOME       = Path(os.path.expanduser("~"))
 COUNTER    = HOME / ".nako-counter"
-INSTALL_URL= "https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh"
+AGENTS_REF = os.environ.get("NAKO_AGENTS_REF", "main")
+DEFAULT_INSTALL_URLS = (
+    f"https://cdn.jsdelivr.net/gh/Lovappen/Agents@{AGENTS_REF}/install.sh",
+    f"https://raw.githubusercontent.com/Lovappen/Agents/{AGENTS_REF}/install.sh",
+)
+INSTALL_URLS = tuple(
+    item.strip()
+    for item in os.environ.get(
+        "NAKO_AGENT_INSTALL_URLS",
+        os.environ.get("NAKO_AGENT_INSTALL_URL", " ".join(DEFAULT_INSTALL_URLS)),
+    ).split()
+    if item.strip()
+)
+INSTALL_URL= INSTALL_URLS[0] if INSTALL_URLS else DEFAULT_INSTALL_URLS[0]
 JOB_DIR    = HOME / ".nako-jobs"
 IP_INDEX   = JOB_DIR / "ip-index.json"
 CC_CONFIG  = HOME / ".cc-connect/config.toml"
@@ -316,6 +329,23 @@ def tool_env() -> dict:
         extra.insert(0, str(latest / "bin"))
     env["PATH"] = ":".join(extra) + ":" + env.get("PATH", "")
     return env
+
+
+def agent_install_command(aid: str) -> str:
+    urls = " ".join(shlex.quote(url) for url in (INSTALL_URLS or DEFAULT_INSTALL_URLS))
+    agent = shlex.quote(aid)
+    return (
+        "set -o pipefail; rc=1; "
+        f"for url in {urls}; do "
+        'echo "=== downloading installer: $url ==="; '
+        f"if curl --retry 3 --connect-timeout 20 -fsSL \"$url\" | bash -s -- --agent-id {agent} --non-interactive --force --with-cc-connect; then "
+        "exit 0; "
+        "fi; "
+        "rc=$?; "
+        'echo "=== installer failed rc=$rc url=$url ==="; '
+        "done; "
+        "exit $rc"
+    )
 
 
 def cc_connect_main_pids() -> list:
@@ -687,8 +717,7 @@ def run_install_and_qr(n: int, force_qr: bool = False, generation: int = None):
         with log.open("w") as f:
             # Install (idempotent)
             rc = subprocess.run(
-                ["bash", "-c",
-                 f"set -o pipefail; curl -fsSL {INSTALL_URL} | bash -s -- --agent-id {aid} --non-interactive --force --with-cc-connect"],
+                ["bash", "-c", agent_install_command(aid)],
                 stdout=f, stderr=subprocess.STDOUT, env=env).returncode
             f.write(f"\n=== install rc={rc} ===\n")
 

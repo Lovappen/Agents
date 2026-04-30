@@ -2,7 +2,7 @@
 # install.sh — Lovappen/Agents Nako installer for macOS / Linux.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | bash
+#   curl -fsSL https://cdn.jsdelivr.net/gh/Lovappen/Agents@main/install.sh | bash
 #   # or clone repo then:  bash install.sh [--force] [--agent-id <id>] [--non-interactive]
 #
 # Flags:

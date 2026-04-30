@@ -6,16 +6,16 @@
 
 ```bash
 # 默认装 nako（目前唯一 agent），交互式问 cc-connect 接入
-curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/Lovappen/Agents@main/install.sh | bash
 
 # 非交互 + QR 飞书一气呵成
-curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | bash -s -- --with-feishu
+curl -fsSL https://cdn.jsdelivr.net/gh/Lovappen/Agents@main/install.sh | bash -s -- --with-feishu
 
 # 选别的 agent
-curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | bash -s -- --agent <name>
+curl -fsSL https://cdn.jsdelivr.net/gh/Lovappen/Agents@main/install.sh | bash -s -- --agent <name>
 
 # 看可用 agent
-curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | bash -s -- --list
+curl -fsSL https://cdn.jsdelivr.net/gh/Lovappen/Agents@main/install.sh | bash -s -- --list
 ```
 
 完整 flag：`bash install.sh --help`。
@@ -39,10 +39,10 @@ curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh | b
 
 ```bash
 # 交互问要不要装飞书/微信
-curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/scripts/cc-connect-setup.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/Lovappen/Agents@main/scripts/cc-connect-setup.sh | bash
 
 # 指定 agent + 自动 QR 飞书 + 微信
-curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/scripts/cc-connect-setup.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/Lovappen/Agents@main/scripts/cc-connect-setup.sh \
   | bash -s -- --agent-id agent-foo --with-feishu --with-weixin
 
 # 本地 clone 后跑
@@ -56,7 +56,7 @@ bash scripts/cc-connect-setup.sh --agent-id agent-foo --with-feishu --with-weixi
 给一台 OpenClaw host 部署 8088 管理页：每个客户端 IP 只分配一个 `agent-nako-N`，页面生成 / 刷新飞书和微信二维码，并直接展示安装与 QR 日志。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lovappen/Agents/main/scripts/nako-agent-factory/install.sh | sudo bash
+curl -fsSL https://cdn.jsdelivr.net/gh/Lovappen/Agents@main/scripts/nako-agent-factory/install.sh | sudo bash
 
 # 或本地 clone 后跑
 cd scripts/nako-agent-factory

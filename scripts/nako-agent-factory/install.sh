@@ -10,8 +10,11 @@ GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 GATEWAY_HEAP_MB="${OPENCLAW_GATEWAY_HEAP_MB:-2048}"
 WATCHDOG_INTERVAL="${NAKO_GATEWAY_WATCHDOG_INTERVAL:-10}"
 TRUSTED_PROXY_CIDRS="${NAKO_TRUSTED_PROXY_CIDRS:-127.0.0.0/8,::1/128,172.16.0.0/12}"
-INSTALL_URL="${NAKO_AGENT_INSTALL_URL:-https://raw.githubusercontent.com/Lovappen/Agents/main/install.sh}"
-FACTORY_BASE_URL="${NAKO_FACTORY_BASE_URL:-https://raw.githubusercontent.com/Lovappen/Agents/main/scripts/nako-agent-factory}"
+AGENTS_REF="${NAKO_AGENTS_REF:-main}"
+INSTALL_URL="${NAKO_AGENT_INSTALL_URL:-https://cdn.jsdelivr.net/gh/Lovappen/Agents@${AGENTS_REF}/install.sh}"
+INSTALL_URLS="${NAKO_AGENT_INSTALL_URLS:-${INSTALL_URL} https://raw.githubusercontent.com/Lovappen/Agents/${AGENTS_REF}/install.sh}"
+FACTORY_BASE_URL="${NAKO_FACTORY_BASE_URL:-https://cdn.jsdelivr.net/gh/Lovappen/Agents@${AGENTS_REF}/scripts/nako-agent-factory}"
+FACTORY_BASE_URLS="${NAKO_FACTORY_BASE_URLS:-${FACTORY_BASE_URL} https://raw.githubusercontent.com/Lovappen/Agents/${AGENTS_REF}/scripts/nako-agent-factory}"
 PREINSTALL="${NAKO_PREINSTALL_OPENCLAW:-0}"
 BOOTSTRAP_AGENT_ID="${NAKO_BOOTSTRAP_AGENT_ID:-agent-nako-bootstrap}"
 
@@ -53,6 +56,34 @@ install_base_packages() {
 
 install_base_packages
 
+download_factory_file() {
+  local name="$1" dest="$2" base last_rc=1
+  for base in ${FACTORY_BASE_URLS}; do
+    echo "Downloading ${name} from ${base}/${name}"
+    if curl --retry 3 --connect-timeout 20 -fsSL "${base}/${name}" -o "${dest}"; then
+      return 0
+    fi
+    last_rc=$?
+  done
+  return "${last_rc}"
+}
+
+run_agent_installer() {
+  local agent_id="$1" url last_rc=1
+  for url in ${INSTALL_URLS}; do
+    echo "Running Nako installer from ${url}"
+    if curl --retry 3 --connect-timeout 20 -fsSL "${url}" | bash -s -- \
+      --agent-id "${agent_id}" \
+      --non-interactive \
+      --force \
+      --with-cc-connect; then
+      return 0
+    fi
+    last_rc=$?
+  done
+  return "${last_rc}"
+}
+
 TMP_DIR=""
 cleanup() {
   [ -n "${TMP_DIR}" ] && rm -rf "${TMP_DIR}"
@@ -64,8 +95,7 @@ SERVER_SRC="${SCRIPT_DIR}/nako-server.py"
 if [ ! -f "${SERVER_SRC}" ]; then
   TMP_DIR="$(mktemp -d)"
   SERVER_SRC="${TMP_DIR}/nako-server.py"
-  echo "Downloading nako-server.py from ${FACTORY_BASE_URL}/nako-server.py"
-  curl -fsSL "${FACTORY_BASE_URL}/nako-server.py" -o "${SERVER_SRC}"
+  download_factory_file "nako-server.py" "${SERVER_SRC}"
 fi
 
 mkdir -p "${INSTALL_DIR}" /root/.cc-connect /root/.nako-jobs /tmp/openclaw /var/tmp/openclaw-compile-cache
@@ -81,11 +111,7 @@ fi
 
 if [ "${PREINSTALL}" = "1" ]; then
   echo "Preinstalling OpenClaw and cc-connect with ${INSTALL_URL}"
-  curl -fsSL "${INSTALL_URL}" | bash -s -- \
-    --agent-id "${BOOTSTRAP_AGENT_ID}" \
-    --non-interactive \
-    --force \
-    --with-cc-connect
+  run_agent_installer "${BOOTSTRAP_AGENT_ID}"
 fi
 
 cat > "${SERVICE_FILE}" <<EOF
@@ -124,3 +150,4 @@ echo "URL:     http://$(hostname -I 2>/dev/null | awk '{print $1}'):${PORT}/"
 echo
 echo "Note: first agent creation runs:"
 echo "  curl -fsSL ${INSTALL_URL} | bash -s -- --agent-id agent-nako-N --non-interactive --force --with-cc-connect"
+echo "Fallback URLs: ${INSTALL_URLS}"

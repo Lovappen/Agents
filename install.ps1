@@ -1,7 +1,7 @@
 # install.ps1 — Nako agent pack installer for Windows PowerShell 7+
 #
 # Usage:
-#   iex (iwr -UseBasicParsing https://raw.githubusercontent.com/Lovappen/Agents/main/install.ps1).Content
+#   iex (iwr -UseBasicParsing https://cdn.jsdelivr.net/gh/Lovappen/Agents@main/install.ps1).Content
 #   # or: pwsh install.ps1 [-Force] [-AgentId agent-nako] [-NonInteractive] [-SkipSkills] [-SkipModels] [-ResetSecrets] [-WithFeishu] [-WithWeixin] [-CcConnectSource auto|npm|lazycat|skip]
 
 [CmdletBinding()]
