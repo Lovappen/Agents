@@ -52,13 +52,15 @@ skill 脚本支持两种产物投递方式，由环境变量 `OPENCLAW_OUTPUT_MO
 
 | 脚本 | 谁来调 | 干什么 |
 |---|---|---|
-| `heartbeat-check.sh` | cron `nako-heartbeat`（每 30 分钟）— agent 在被唤起时 `Bash` 调用 | 更新思念值/情绪值。退出码 1 = 达阈值，agent 应主动发一条思念消息到当前 session |
-| `daily-missing-reminder.sh` | cron `nako-missing-reminder`（每天 16:50） | 触发 doki 振动 + 兜底通过 cc-connect/openclaw 发条消息（agentTurn 里 agent 也会自己生成） |
+| `heartbeat-check.sh` | cron `nako-heartbeat`（每 30 分钟）— agent 在被唤起时 `Bash` 调用 | 更新思念值/情绪值。退出码 1 = 达阈值，agent 应主动生成一条消息 |
+| `send-active-message.sh` | cron / agent 需要主动发文字时调用 | 通过 cc-connect 发送到当前最近活跃会话；不要依赖 openclaw cron delivery |
+| `daily-missing-reminder.sh` | cron `nako-missing-reminder`（每天 16:50） | 发送默认思念提醒或只触发 doki 振动（`NAKO_REMINDER_SKIP_SEND=1`） |
 | `mood-recovery.sh` | **agent 在每次收到用户消息时主动调用** | 思念值清零、情绪回血。务必在每个 turn 开头跑一次 |
 
 调用约定：
 ```bash
 bash <workspace>/scripts/heartbeat-check.sh   # 退出码 1 = 触发
+bash <workspace>/scripts/send-active-message.sh "主人大人～..."  # 主动发文字
 bash <workspace>/scripts/mood-recovery.sh     # 用户来消息时
 ```
 
