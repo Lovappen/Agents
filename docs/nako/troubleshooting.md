@@ -135,6 +135,18 @@ bash scripts/cc-connect-setup.sh --agent-id agent-nako --with-weixin --cc-connec
 
 每条 inbound 消息附带 `context_token`，被 cc-connect 缓存到 `~/.cc-connect/weixin/<project>/<bot>/context_tokens.json`。token 有较短 TTL（实测几分钟），过期后任何 outbound（含 text）都会 ret=-2。**只能在用户最近发消息后短窗口内主动推送** —— cron 触发的 daily-missing-reminder 等场景不保证送达。
 
+## 定时任务报 `Channel is required`
+
+如果 cron 状态里看到：
+
+```text
+Channel is required (no configured channels detected)
+```
+
+说明 job 还在使用 OpenClaw 原生 `delivery.channel=last`。通过 cc-connect / ACP 进入的微信、飞书会话不会被 OpenClaw 识别成原生 channel，所以主动消息要由 agent 调 `<workspace>/scripts/send-active-message.sh` 发送。
+
+重跑最新版安装脚本会把已有 `nako-heartbeat`、`nako-daily-script`、`nako-missing-reminder` 改成 `--session isolated --no-deliver`。历史错误会留在 `jobs-state.json`，等下一次任务跑完才会刷新。
+
 ## 提 Issue
 
 [github.com/Lovappen/Agents/issues](https://github.com/Lovappen/Agents/issues)

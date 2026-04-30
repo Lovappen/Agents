@@ -166,9 +166,11 @@ nako 的主动行为由三层组成：
 
 | 名称 | 时间 | 作用 |
 |---|---|---|
-| `nako-heartbeat` | 每 30 分钟 | 调 `heartbeat-check.sh`，到阈值后让 agent 主动生成消息 |
+| `nako-heartbeat` | 每 30 分钟 | 调 `heartbeat-check.sh`，到阈值后让 agent 主动生成消息，并用 `send-active-message.sh` 经 cc-connect 发送 |
 | `nako-daily-script` | 每天 08:00 | 生成当天日常剧本 |
-| `nako-missing-reminder` | 每天 16:50 | 生成思念提醒，并可触发 doki |
+| `nako-missing-reminder` | 每天 16:50 | 生成思念提醒，经 cc-connect 发送，并可触发 doki |
+
+这些 cron job 注册时使用 `--no-deliver`：OpenClaw 只负责唤醒 agent，不负责 fallback delivery。主动消息必须走 `<workspace>/scripts/send-active-message.sh`，否则通过 cc-connect/ACP 进入的微信或飞书会话不会被 OpenClaw 识别为 `delivery.channel=last`。
 
 查看：
 
@@ -261,4 +263,3 @@ tail -f ~/.openclaw/skills/voice/logs/skill.jsonl | jq .
 ~/.openclaw/skills/vision/scripts/resolve.sh --latest
 bash ~/.openclaw/workspace/agent-nako/scripts/heartbeat-check.sh
 ```
-

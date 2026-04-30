@@ -424,6 +424,14 @@ Write-EnvValues (Join-Path $AgentWorkspace "skills\.env") @(
   "FEISHU_APP_ID","FEISHU_APP_SECRET","SELFIE_REFERENCE_IMAGE","SELFIE_CHARACTER_DESC"
 )
 
+if (Test-Path (Join-Path $PackRoot "agent\scripts")) {
+  $WorkspaceScripts = Join-Path $AgentWorkspace "scripts"
+  New-Item -ItemType Directory -Path $WorkspaceScripts -Force | Out-Null
+  Get-ChildItem (Join-Path $PackRoot "agent\scripts") -File -Filter "*.sh" | ForEach-Object {
+    Safe-InstallFile $_.FullName (Join-Path $WorkspaceScripts $_.Name)
+  }
+}
+
 Dim "保护不动：memory\, sessions\, auth-*.json"
 
 # ─── Merge openclaw.json ────────────────────────────────────────────────────

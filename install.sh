@@ -633,27 +633,41 @@ if [ "$gateway_up" = "0" ]; then
   dim "  cron 命令："
   for cron in "nako-heartbeat|*/30 * * * *" "nako-daily-script|0 8 * * *" "nako-missing-reminder|50 16 * * *"; do
     n="${cron%%|*}"; e="${cron#*|}"
-    dim "    openclaw cron add --name $n --agent $AGENT_ID --cron \"$e\" --message ... --session-key agent:$AGENT_ID:main"
+    dim "    openclaw cron add --name $n --agent $AGENT_ID --cron \"$e\" --message ... --session-key agent:$AGENT_ID:main --session isolated --no-deliver"
   done
 elif has_bin openclaw; then
-  for line in \
-      "nako-heartbeat|*/30 * * * *|执行思念机制：bash $AGENT_WORKSPACE/scripts/heartbeat-check.sh，若退出码 1 则基于 memory/daily-script.md 和当前情绪生成一条主动思念消息发给主人，发送后任由 openclaw cron 路由到当前激活的 session/channel。" \
-      "nako-daily-script|0 8 * * *|更新 memory/daily-script.md：参考前几日剧本生成今天的剧情（早午下晚四段），保持人物连续性、有生活感+恋爱气息，结尾加'角色状态'与'明日预告'。" \
-      "nako-missing-reminder|50 16 * * *|每天 16:50 思念提醒：基于当日剧本和情绪状态生成一条思念消息发给主人；之后调 bash $AGENT_WORKSPACE/scripts/daily-missing-reminder.sh 触发设备振动；记录到 heartbeat-state.json。"; do
-    name="${line%%|*}"; rest="${line#*|}"
-    expr="${rest%%|*}";  msg="${rest#*|}"
-    if openclaw cron list 2>/dev/null | grep -q "$name"; then
-      dim "  = $name (已存在，跳过)"
+  register_or_update_cron() {
+    local name="$1" expr="$2" msg="$3" id="" rc=0 _err=""
+    id="$(openclaw cron show "$name" --json 2>/dev/null | python3 -c 'import json,sys; print((json.load(sys.stdin).get("id") or ""))' 2>/dev/null || true)"
+    if [ -n "$id" ]; then
+      _err=$(openclaw cron edit "$id" --agent "$AGENT_ID" --cron "$expr" \
+           --message "$msg" --session-key "agent:$AGENT_ID:main" \
+           --session isolated --no-deliver 2>&1 >/dev/null) && rc=0 || rc=$?
+      if [ "$rc" = "0" ]; then
+        info "$name updated"
+      else
+        warn "$name 更新失败 (rc=$rc): $(echo "$_err" | head -2)"
+      fi
     else
       _err=$(openclaw cron add --name "$name" --agent "$AGENT_ID" --cron "$expr" \
-           --message "$msg" --session-key "agent:$AGENT_ID:main" 2>&1 >/dev/null) && rc=0 || rc=$?
+           --message "$msg" --session-key "agent:$AGENT_ID:main" \
+           --session isolated --no-deliver 2>&1 >/dev/null) && rc=0 || rc=$?
       if [ "$rc" = "0" ]; then
         info "$name registered"
       else
         warn "$name 注册失败 (rc=$rc): $(echo "$_err" | head -2)"
-        dim "  手动重试：openclaw cron add --name $name --agent $AGENT_ID --cron \"$expr\" --message ... --session-key agent:$AGENT_ID:main"
+        dim "  手动重试：openclaw cron add --name $name --agent $AGENT_ID --cron \"$expr\" --message ... --session-key agent:$AGENT_ID:main --no-deliver"
       fi
     fi
+  }
+
+  for line in \
+      "nako-heartbeat|*/30 * * * *|执行思念机制：先用 Bash 跑 $AGENT_WORKSPACE/scripts/heartbeat-check.sh。若退出码为 1，基于 HEARTBEAT.md、memory/daily-script.md 和当前情绪生成一条不超过100字的主动问候，然后必须用 Bash 调用 $AGENT_WORKSPACE/scripts/send-active-message.sh \"<消息>\" 发送；发送成功后最终只回复 HEARTBEAT_SENT。若未触发，只回复 HEARTBEAT_OK。不要依赖 openclaw cron delivery 发送消息。" \
+      "nako-daily-script|0 8 * * *|更新 memory/daily-script.md：参考前几日剧本生成今天的剧情（早午下晚四段），保持人物连续性、有生活感+恋爱气息，结尾加'角色状态'与'明日预告'。最终只回复 DAILY_SCRIPT_UPDATED，不要发送给用户。" \
+      "nako-missing-reminder|50 16 * * *|每天 16:50 思念提醒：生成一条不超过100字的主动问候，用 Bash 调用 $AGENT_WORKSPACE/scripts/send-active-message.sh \"<消息>\" 发送给主人；随后用 NAKO_REMINDER_SKIP_SEND=1 bash $AGENT_WORKSPACE/scripts/daily-missing-reminder.sh 触发设备振动并记录状态。最终只回复 MISSING_REMINDER_SENT。不要依赖 openclaw cron delivery 发送消息。"; do
+    name="${line%%|*}"; rest="${line#*|}"
+    expr="${rest%%|*}";  msg="${rest#*|}"
+    register_or_update_cron "$name" "$expr" "$msg"
   done
 else
   warn "未发现 openclaw 命令，跳过 cron 注册"
